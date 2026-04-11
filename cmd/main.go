@@ -21,9 +21,12 @@ import (
 
 func main() {
 	// Load environment variables
-	err := godotenv.Load("../.env")
+	err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		err = godotenv.Load("../.env")
+	}
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
 	}
 
 	// Check if sharding is enabled
@@ -53,16 +56,18 @@ func main() {
 
 	// Initialize repositories based on sharding configuration
 	var (
-		forgotPasswordRepo repository.ResetPasswordRepository
-		userRepo           repository.UserRepository
-		verificationRepo   repository.VerificationRepository
-		activityRepo       repository.ActivityRepository
-		profileRepo        repository.UserProfileRepository
-		predictionRepo     repository.PredictionRepository
-		predictionJobRepo  repository.PredictionJobRepository
+		forgotPasswordRepo    repository.ResetPasswordRepository
+		userRepo              repository.UserRepository
+		verificationRepo      repository.VerificationRepository
+		activityRepo          repository.ActivityRepository
+		profileRepo           repository.UserProfileRepository
+		predictionRepo        repository.PredictionRepository
+		predictionJobRepo     repository.PredictionJobRepository
+		counterfactualJobRepo repository.CounterfactualJobRepository
 	)
 
 	predictionJobRepo = repository.NewPredictionJobRepository(database.DB)
+	counterfactualJobRepo = repository.NewCounterfactualJobRepository(database.DB)
 
 	if useSharding {
 		// Use sharded repositories
@@ -137,6 +142,17 @@ func main() {
 	predictionJobWorker.Start()
 	defer predictionJobWorker.Stop()
 
+	counterfactualJobService := services.NewCounterfactualJobService(
+		counterfactualJobRepo,
+		rabbitMQURL,
+		"ml.cf.request",
+		"ml.cf.response",
+	)
+	if err := counterfactualJobService.Start(); err != nil {
+		log.Fatalf("Failed to start counterfactual job service: %v", err)
+	}
+	defer counterfactualJobService.Stop()
+
 	// Initialize controllers
 	userController := controllers.NewUserController(userRepo, forgotPasswordRepo)
 	verificationController := controllers.NewVerificationController(verificationRepo, userRepo)
@@ -154,6 +170,10 @@ func main() {
 		predictionJobWorker, // Job worker
 		mlClient,            // ML client for health checks
 	)
+	counterfactualController := controllers.NewCounterfactualController(
+		counterfactualJobRepo,
+		counterfactualJobService,
+	)
 
 	gin.SetMode(gin.ReleaseMode)
 	// Setup Gin router
@@ -161,11 +181,12 @@ func main() {
 
 	router.GET("/", func(c *gin.Context) {
 		response := gin.H{
-			"message":    "Diabetify API is running",
-			"version":    "1.0.0",
-			"status":     "healthy",
-			"ml_service": "Hybrid (gRPC + RabbitMQ)",
-			"prediction": "Async prediction jobs via RabbitMQ",
+			"message":        "Diabetify API is running",
+			"version":        "1.0.0",
+			"status":         "healthy",
+			"ml_service":     "Hybrid (gRPC + RabbitMQ)",
+			"prediction":     "Async prediction jobs via RabbitMQ",
+			"counterfactual": "Async counterfactual jobs via RabbitMQ",
 		}
 
 		if useSharding {
@@ -185,6 +206,7 @@ func main() {
 	routes.RegisterActivityRoutes(router, activityController)
 	routes.RegisterUserProfileRoutes(router, profileController)
 	routes.RegisterPredictionRoutes(router, predictionController)
+	routes.RegisterCounterfactualRoutes(router, counterfactualController)
 
 	// Debug endpoints
 	router.GET("/debug/stats", func(c *gin.Context) {
@@ -215,6 +237,12 @@ func main() {
 			"job_worker_running": predictionJobWorker != nil,
 			"worker_count":       workerCount,
 			"message":            "Job worker is active and processing async predictions",
+		})
+	})
+
+	router.GET("/debug/counterfactual", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"counterfactual_service": counterfactualJobService.GetStatus(),
 		})
 	})
 

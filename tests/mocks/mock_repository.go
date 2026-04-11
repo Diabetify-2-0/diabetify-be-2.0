@@ -420,3 +420,63 @@ func (m *MockPredictionJobWorker) GetStatus() map[string]interface{} {
 	args := m.Called()
 	return args.Get(0).(map[string]interface{})
 }
+
+type MockCounterfactualJobRepository struct {
+	mock.Mock
+}
+
+func (m *MockCounterfactualJobRepository) SaveJob(job *models.CounterfactualJob) error {
+	args := m.Called(job)
+	return args.Error(0)
+}
+
+func (m *MockCounterfactualJobRepository) GetJobByID(id string) (*models.CounterfactualJob, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.CounterfactualJob), args.Error(1)
+}
+
+func (m *MockCounterfactualJobRepository) GetJobsByUserID(userID uint, limit int) ([]*models.CounterfactualJob, error) {
+	args := m.Called(userID, limit)
+	return args.Get(0).([]*models.CounterfactualJob), args.Error(1)
+}
+
+func (m *MockCounterfactualJobRepository) UpdateJobSubmissionStatus(jobID string) error {
+	args := m.Called(jobID)
+	return args.Error(0)
+}
+
+func (m *MockCounterfactualJobRepository) UpdateJobTerminalStatus(jobID, status string, reasonCode, errorMessage, resultPayload *string) error {
+	args := m.Called(jobID, status, reasonCode, errorMessage, resultPayload)
+	return args.Error(0)
+}
+
+func (m *MockCounterfactualJobRepository) CancelJob(jobID string) error {
+	args := m.Called(jobID)
+	return args.Error(0)
+}
+
+type MockCounterfactualJobService struct {
+	mock.Mock
+}
+
+func (m *MockCounterfactualJobService) Start() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockCounterfactualJobService) Stop() {
+	m.Called()
+}
+
+func (m *MockCounterfactualJobService) SubmitJob(jobID string, payload map[string]interface{}) error {
+	args := m.Called(jobID, payload)
+	return args.Error(0)
+}
+
+func (m *MockCounterfactualJobService) GetStatus() map[string]interface{} {
+	args := m.Called()
+	return args.Get(0).(map[string]interface{})
+}

@@ -1109,7 +1109,7 @@ func (pc *PredictionController) GetLatestPredictionExplanation(c *gin.Context) {
 			Impact:       prediction.BMIImpact,
 		},
 		"brinkman_score": {
-			Value:        fmt.Sprintf("%.1f", prediction.BrinkmanScore),
+			Value:        fmt.Sprintf("%d", prediction.BrinkmanScore),
 			Shap:         prediction.BrinkmanScoreShap,
 			Contribution: prediction.BrinkmanScoreContribution,
 			Impact:       prediction.BrinkmanScoreImpact,

@@ -1,36 +1,70 @@
 services:
-  # diabetify-db:
-  #   image: postgres:16-alpine
-  #   restart: always
-  #   environment:
-  #     POSTGRES_USER: ${DB_USER}
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
-  #     POSTGRES_DB: ${DB_NAME}
-  #   ports:
-  #     - "${DB_PORT}:5432"
-  #   volumes:
-  #     # - "./database/script:/docker-entrypoint-initdb.d"
-  #     - "postgres_data:/var/lib/postgresql/data"
-  #   networks:
-  #     default:
-  #       aliases:
-  #         - diabetify-db
-  diabetify-be: 
+  diabetify-db:
+    image: postgres:16-alpine
+    container_name: diabetify-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-diabetify}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-diabetify}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: diabetify-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-password123}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  diabetify-be:
     build:
       context: .
       dockerfile: Dockerfile
-    restart: always
+    container_name: diabetify-be
+    restart: unless-stopped
     environment:
-      APP_ENV: ${APP_ENV}
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
-      DB_SSLMODE: ${DB_SSLMODE}
+      APP_ENV: ${APP_ENV:-dev}
+      DB_HOST: diabetify-db
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-diabetify}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      PORT: ${PORT:-8080}
+      USE_SHARDING: ${USE_SHARDING:-false}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-password123}@rabbitmq:5672/
+      ML_SERVICE_ADDRESS: ${ML_SERVICE_ADDRESS:-localhost:50051}
     ports:
-      - "${APP_PORT}:8080"
-    # depends_on:
-    #   - diabetify-db
-# volumes:
-#   postgres_data:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./.env:/app/.env:ro
+    depends_on:
+      diabetify-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
