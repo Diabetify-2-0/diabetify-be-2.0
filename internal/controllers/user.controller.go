@@ -42,6 +42,15 @@ type ResetPasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required"`
 }
 
+type RegisterUserRequest struct {
+	Email    string  `json:"email" binding:"required,email"`
+	Password string  `json:"password" binding:"required,min=8"`
+	Name     string  `json:"name" binding:"required,min=2"`
+	Gender   *string `json:"gender"`
+	DOB      *string `json:"dob"`
+	Role     string  `json:"role" binding:"required,oneof=USER DATA_SCIENTIST MEDICAL_EXPERT"`
+}
+
 func hashPassword(password string) (string, error) {
 	salt := make([]byte, 8)
 	_, err := rand.Read(salt)
@@ -82,21 +91,21 @@ func verifyPassword(hashedPassword, password string) bool {
 	return bytes.Equal(hash, expectedHash)
 }
 
-// CreateUser godoc
-// @Summary Create a new user
-// @Description Create a user with the provided data
+// RegisterUser godoc
+// @Summary Register a new user
+// @Description Register a new user with role: USER, DATA_SCIENTIST, or MEDICAL_EXPERT
 // @Tags users
 // @Accept json
 // @Produce json
-// @Param user body models.User true "User data"
+// @Param request body RegisterUserRequest true "User registration data with role"
 // @Success 201 {object} map[string]interface{} "User registered successfully"
-// @Failure 400 {object} map[string]interface{} "Invalid request data"
+// @Failure 400 {object} map[string]interface{} "Invalid request data or invalid role"
 // @Failure 500 {object} map[string]interface{} "Failed to create user"
 // @Router /users [post]
-func (uc *UserController) CreateUser(c *gin.Context) {
-	var user models.User
+func (uc *UserController) RegisterUser(c *gin.Context) {
+	var req RegisterUserRequest
 
-	if err := c.ShouldBindJSON(&user); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
 			"message": "Invalid request data",
@@ -105,7 +114,7 @@ func (uc *UserController) CreateUser(c *gin.Context) {
 		return
 	}
 
-	hashedPassword, err := hashPassword(user.Password)
+	hashedPassword, err := hashPassword(req.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -114,11 +123,9 @@ func (uc *UserController) CreateUser(c *gin.Context) {
 		})
 		return
 	}
-	user.Password = hashedPassword
 
-	user.Verified = false
 	// Check if email already exists
-	if _, err := uc.repo.GetUserByEmail(user.Email); err == nil {
+	if _, err := uc.repo.GetUserByEmail(req.Email); err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
 			"message": "Email already in use",
@@ -126,6 +133,17 @@ func (uc *UserController) CreateUser(c *gin.Context) {
 		})
 		return
 	}
+
+	user := models.User{
+		Name:     req.Name,
+		Email:    req.Email,
+		Password: hashedPassword,
+		Gender:   req.Gender,
+		DOB:      req.DOB,
+		Role:     req.Role,
+		Verified: false,
+	}
+
 	if err := uc.repo.CreateUser(&user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -135,10 +153,25 @@ func (uc *UserController) CreateUser(c *gin.Context) {
 		return
 	}
 
+	var message string
+	switch req.Role {
+	case "DATA_SCIENTIST":
+		message = "Data Scientist registered successfully."
+	case "MEDICAL_EXPERT":
+		message = "Medical Expert registered successfully."
+	default:
+		message = "User registered successfully. Please verify your email."
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"status":  "success",
-		"message": "User registered. Please verify your email.",
-		"data":    nil,
+		"message": message,
+		"data": gin.H{
+			"id":    user.ID,
+			"email": user.Email,
+			"name":  user.Name,
+			"role":  user.Role,
+		},
 	})
 }
 

@@ -17,6 +17,7 @@ type User struct {
 	Gender           *string        `gorm:"type:text;check:gender IN ('male', 'female');" json:"gender" example:"male"`
 	Password         string         `json:"password" example:"securepassword123"`
 	DOB              *string        `gorm:"type:DATE;" json:"dob" example:"2000-01-30"`
+	Role             string         `gorm:"type:varchar(50);default:USER;check:role IN ('USER', 'DATA_SCIENTIST', 'MEDICAL_EXPERT')" json:"role" example:"USER"`
 	Verified         bool           `gorm:"default:false" json:"verified" example:"false"`
 	LastPredictionAt *time.Time     `json:"last_prediction_at,omitempty" example:"2023-01-01T00:00:00Z"`
 }
