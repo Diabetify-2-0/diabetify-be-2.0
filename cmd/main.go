@@ -156,10 +156,11 @@ func main() {
 	// Initialize services
 	userService := services.NewUserService(userRepo, forgotPasswordRepo)
 	profileService := services.NewUserProfileService(profileRepo)
+	verificationService := services.NewVerificationService(verificationRepo, userRepo)
 
 	// Initialize controllers
 	userController := controllers.NewUserController(userService)
-	verificationController := controllers.NewVerificationController(verificationRepo, userRepo)
+	verificationController := controllers.NewVerificationController(verificationService)
 	oauthController := controllers.NewOauthController(userRepo)
 	activityController := controllers.NewActivityController(activityRepo)
 	profileController := controllers.NewUserProfileController(profileService)

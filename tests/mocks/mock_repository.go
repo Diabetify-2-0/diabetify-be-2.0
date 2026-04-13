@@ -518,3 +518,22 @@ func (m *MockUserProfileService) PatchUserProfile(userID uint, data map[string]i
 	args := m.Called(userID, data)
 	return args.Error(0)
 }
+
+type MockVerificationService struct {
+	mock.Mock
+}
+
+func (m *MockVerificationService) SendVerificationCode(email string) (string, error) {
+	args := m.Called(email)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockVerificationService) VerifyCode(email, code string) error {
+	args := m.Called(email, code)
+	return args.Error(0)
+}
+
+func (m *MockVerificationService) ResendVerificationCode(email string) (string, error) {
+	args := m.Called(email)
+	return args.String(0), args.Error(1)
+}

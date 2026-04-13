@@ -1,12 +1,9 @@
 package controllers
 
 import (
-	"diabetify/internal/models"
-	"diabetify/internal/repository"
+	"diabetify/internal/services"
 	"diabetify/internal/utils"
-	"log"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,18 +18,11 @@ type VerificationRequest struct {
 }
 
 type VerificationController struct {
-	verificationRepo repository.VerificationRepository
-	userRepo         repository.UserRepository
-	mailConfig       utils.MailConfig
+	service services.VerificationService
 }
 
-func NewVerificationController(verificationRepo repository.VerificationRepository, userRepo repository.UserRepository) *VerificationController {
-	mailConfig := utils.LoadMailConfig()
-	return &VerificationController{
-		verificationRepo: verificationRepo,
-		userRepo:         userRepo,
-		mailConfig:       mailConfig,
-	}
+func NewVerificationController(service services.VerificationService) *VerificationController {
+	return &VerificationController{service: service}
 }
 
 // SendVerificationCode godoc
@@ -59,43 +49,29 @@ func (vc *VerificationController) SendVerificationCode(c *gin.Context) {
 		return
 	}
 
-	// Check if user exists
-	_, err := vc.userRepo.GetUserByEmail(req.Email)
+	// Call service to generate and send verification code
+	code, err := vc.service.SendVerificationCode(req.Email)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"status":  "error",
-			"message": "User not found",
-			"error":   "No account associated with this email",
-		})
-		return
-	}
-
-	// Generate a 6-digit code
-	code := utils.GenerateVerificationCode()
-
-	// Store in DB (delete old if exists)
-	vc.verificationRepo.DeleteByEmail(req.Email)
-
-	verification := &models.Verification{
-		Email:     req.Email,
-		Code:      code,
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-	}
-
-	if err := vc.verificationRepo.CreateVerification(verification); err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, gin.H{
+				"status":  "error",
+				"message": "User not found",
+				"error":   "No account associated with this email",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to create verification code",
-			"error":   "Database error",
+			"error":   err.Error(),
 		})
 		return
 	}
 
-	// Send email asynchronously
+	// Send email asynchronously with the returned code
+	mailConfig := utils.LoadMailConfig()
 	go func() {
-		if err := utils.SendEmail(vc.mailConfig, req.Email, "Verification Code", "Your verification code is: "+code); err != nil {
-			log.Printf("Failed to send email to %s: %v", req.Email, err)
-		}
+		utils.SendEmail(mailConfig, req.Email, "Verification Code", "Your verification code is: "+code)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -129,26 +105,15 @@ func (vc *VerificationController) VerifyCode(c *gin.Context) {
 		return
 	}
 
-	_, err := vc.verificationRepo.FindByEmailAndCode(req.Email, req.Code)
-	if err != nil {
+	// Call service to verify code
+	if err := vc.service.VerifyCode(req.Email, req.Code); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"status":  "error",
 			"message": "Invalid or expired verification code",
-			"error":   "Code is incorrect or has expired",
+			"error":   err.Error(),
 		})
 		return
 	}
-
-	if err := vc.userRepo.SetUserVerified(req.Email); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to verify user",
-			"error":   "Database error",
-		})
-		return
-	}
-
-	vc.verificationRepo.DeleteByEmail(req.Email)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",

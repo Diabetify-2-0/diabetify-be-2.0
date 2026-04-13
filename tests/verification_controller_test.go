@@ -7,15 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"diabetify/internal/controllers"
-	"diabetify/internal/models"
 	"diabetify/tests/mocks"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 // Test helper functions
@@ -25,15 +22,15 @@ func setupVerificationTestRouter() *gin.Engine {
 	return router
 }
 
-func setupVerificationControllerWithMocks() (*controllers.VerificationController, *mocks.MockVerificationRepository, *mocks.MockUserRepository) {
-	mockVerificationRepo := new(mocks.MockVerificationRepository)
-	mockUserRepo := new(mocks.MockUserRepository)
-	controller := controllers.NewVerificationController(mockVerificationRepo, mockUserRepo)
-	return controller, mockVerificationRepo, mockUserRepo
+func setupVerificationControllerWithMocks() (*controllers.VerificationController, *mocks.MockVerificationService) {
+	mockVerificationService := new(mocks.MockVerificationService)
+	controller := controllers.NewVerificationController(mockVerificationService)
+	return controller, mockVerificationService
 }
 
 func TestNewVerificationController(t *testing.T) {
-	controller, _, _ := setupVerificationControllerWithMocks()
+	mockService := new(mocks.MockVerificationService)
+	controller := controllers.NewVerificationController(mockService)
 	assert.NotNil(t, controller)
 }
 
@@ -41,7 +38,7 @@ func TestSendVerificationCode(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockVerificationRepository, *mocks.MockUserRepository)
+		setupMocks     func(*mocks.MockVerificationService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -50,14 +47,8 @@ func TestSendVerificationCode(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "test@example.com",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				user := &models.User{
-					ID:    1,
-					Email: "test@example.com",
-				}
-				userRepo.On("GetUserByEmail", "test@example.com").Return(user, nil)
-				verificationRepo.On("DeleteByEmail", "test@example.com").Return(nil)
-				verificationRepo.On("CreateVerification", mock.AnythingOfType("*models.Verification")).Return(nil)
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				mockService.On("SendVerificationCode", "test@example.com").Return("123456", nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Verification code sent successfully",
@@ -67,7 +58,7 @@ func TestSendVerificationCode(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "invalid-email",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
+			setupMocks: func(mockService *mocks.MockVerificationService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -78,8 +69,8 @@ func TestSendVerificationCode(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "nonexistent@example.com",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				userRepo.On("GetUserByEmail", "nonexistent@example.com").Return(nil, errors.New("user not found"))
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				mockService.On("SendVerificationCode", "nonexistent@example.com").Return("", errors.New("user not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "User not found",
@@ -89,14 +80,8 @@ func TestSendVerificationCode(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "test@example.com",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				user := &models.User{
-					ID:    1,
-					Email: "test@example.com",
-				}
-				userRepo.On("GetUserByEmail", "test@example.com").Return(user, nil)
-				verificationRepo.On("DeleteByEmail", "test@example.com").Return(nil)
-				verificationRepo.On("CreateVerification", mock.AnythingOfType("*models.Verification")).Return(errors.New("database error"))
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				mockService.On("SendVerificationCode", "test@example.com").Return("", errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedMsg:    "Failed to create verification code",
@@ -104,7 +89,7 @@ func TestSendVerificationCode(t *testing.T) {
 		{
 			name:        "missing email field",
 			requestBody: map[string]interface{}{},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
+			setupMocks: func(mockService *mocks.MockVerificationService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -114,8 +99,8 @@ func TestSendVerificationCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, verificationRepo, userRepo := setupVerificationControllerWithMocks()
-			tt.setupMocks(verificationRepo, userRepo)
+			controller, mockService := setupVerificationControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupVerificationTestRouter()
 			router.POST("/verify/send", controller.SendVerificationCode)
@@ -134,8 +119,7 @@ func TestSendVerificationCode(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			verificationRepo.AssertExpectations(t)
-			userRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -144,7 +128,7 @@ func TestVerifyCode(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockVerificationRepository, *mocks.MockUserRepository)
+		setupMocks     func(*mocks.MockVerificationService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -154,15 +138,8 @@ func TestVerifyCode(t *testing.T) {
 				"email": "test@example.com",
 				"code":  "123456",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				verification := &models.Verification{
-					Email:     "test@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-				}
-				verificationRepo.On("FindByEmailAndCode", "test@example.com", "123456").Return(verification, nil)
-				userRepo.On("SetUserVerified", "test@example.com").Return(nil)
-				verificationRepo.On("DeleteByEmail", "test@example.com").Return(nil)
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				mockService.On("VerifyCode", "test@example.com", "123456").Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Verification successful",
@@ -173,8 +150,8 @@ func TestVerifyCode(t *testing.T) {
 				"email": "test@example.com",
 				"code":  "wrong123",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				verificationRepo.On("FindByEmailAndCode", "test@example.com", "wrong123").Return(nil, errors.New("verification not found"))
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				mockService.On("VerifyCode", "test@example.com", "wrong123").Return(errors.New("invalid or expired verification code"))
 			},
 			expectedStatus: http.StatusUnauthorized,
 			expectedMsg:    "Invalid or expired verification code",
@@ -185,17 +162,11 @@ func TestVerifyCode(t *testing.T) {
 				"email": "test@example.com",
 				"code":  "123456",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				verification := &models.Verification{
-					Email:     "test@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-				}
-				verificationRepo.On("FindByEmailAndCode", "test@example.com", "123456").Return(verification, nil)
-				userRepo.On("SetUserVerified", "test@example.com").Return(errors.New("database error"))
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				mockService.On("VerifyCode", "test@example.com", "123456").Return(errors.New("failed to verify user"))
 			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedMsg:    "Failed to verify user",
+			expectedStatus: http.StatusUnauthorized,
+			expectedMsg:    "Invalid or expired verification code",
 		},
 		{
 			name: "invalid request format",
@@ -203,7 +174,7 @@ func TestVerifyCode(t *testing.T) {
 				"email": "test@example.com",
 				// Missing code field
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
+			setupMocks: func(mockService *mocks.MockVerificationService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -215,7 +186,7 @@ func TestVerifyCode(t *testing.T) {
 				"email": "invalid-email",
 				"code":  "123456",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
+			setupMocks: func(mockService *mocks.MockVerificationService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -225,8 +196,8 @@ func TestVerifyCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, verificationRepo, userRepo := setupVerificationControllerWithMocks()
-			tt.setupMocks(verificationRepo, userRepo)
+			controller, mockService := setupVerificationControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupVerificationTestRouter()
 			router.POST("/verify", controller.VerifyCode)
@@ -245,8 +216,7 @@ func TestVerifyCode(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			verificationRepo.AssertExpectations(t)
-			userRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -255,7 +225,7 @@ func TestResendVerificationCode(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockVerificationRepository, *mocks.MockUserRepository)
+		setupMocks     func(*mocks.MockVerificationService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -264,14 +234,9 @@ func TestResendVerificationCode(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "test@example.com",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				user := &models.User{
-					ID:    1,
-					Email: "test@example.com",
-				}
-				userRepo.On("GetUserByEmail", "test@example.com").Return(user, nil)
-				verificationRepo.On("DeleteByEmail", "test@example.com").Return(nil)
-				verificationRepo.On("CreateVerification", mock.AnythingOfType("*models.Verification")).Return(nil)
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				// ResendVerificationCode internally calls SendVerificationCode
+				mockService.On("SendVerificationCode", "test@example.com").Return("123456", nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Verification code sent successfully",
@@ -281,8 +246,9 @@ func TestResendVerificationCode(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "nonexistent@example.com",
 			},
-			setupMocks: func(verificationRepo *mocks.MockVerificationRepository, userRepo *mocks.MockUserRepository) {
-				userRepo.On("GetUserByEmail", "nonexistent@example.com").Return(nil, errors.New("user not found"))
+			setupMocks: func(mockService *mocks.MockVerificationService) {
+				// ResendVerificationCode internally calls SendVerificationCode
+				mockService.On("SendVerificationCode", "nonexistent@example.com").Return("", errors.New("user not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "User not found",
@@ -291,8 +257,8 @@ func TestResendVerificationCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, verificationRepo, userRepo := setupVerificationControllerWithMocks()
-			tt.setupMocks(verificationRepo, userRepo)
+			controller, mockService := setupVerificationControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupVerificationTestRouter()
 			router.POST("/verify/resend", controller.ResendVerificationCode)
@@ -311,23 +277,16 @@ func TestResendVerificationCode(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			verificationRepo.AssertExpectations(t)
-			userRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
 
 // Benchmark tests
 func BenchmarkSendVerificationCode(b *testing.B) {
-	controller, verificationRepo, userRepo := setupVerificationControllerWithMocks()
+	controller, mockService := setupVerificationControllerWithMocks()
 
-	user := &models.User{
-		ID:    1,
-		Email: "test@example.com",
-	}
-	userRepo.On("GetUserByEmail", "test@example.com").Return(user, nil)
-	verificationRepo.On("DeleteByEmail", "test@example.com").Return(nil)
-	verificationRepo.On("CreateVerification", mock.AnythingOfType("*models.Verification")).Return(nil)
+	mockService.On("SendVerificationCode", "test@example.com").Return("123456", nil)
 
 	router := setupVerificationTestRouter()
 	router.POST("/verify/send", controller.SendVerificationCode)
