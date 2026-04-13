@@ -453,6 +453,16 @@ func TestPatchUserProfile(t *testing.T) {
 			},
 			setupMock: func(m *mocks.MockUserProfileService) {
 				m.On("PatchUserProfile", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(nil)
+				weight := 80
+				height := 175
+				bmi := 26.12
+				m.On("GetUserProfile", uint(1)).Return(&models.UserProfile{
+					ID:     1,
+					UserID: 1,
+					Weight: &weight,
+					Height: &height,
+					BMI:    &bmi,
+				}, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Profile patched successfully",
@@ -465,6 +475,18 @@ func TestPatchUserProfile(t *testing.T) {
 			},
 			setupMock: func(m *mocks.MockUserProfileService) {
 				m.On("PatchUserProfile", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(nil)
+				bloodline := true
+				weight := 75
+				height := 175
+				bmi := 24.49
+				m.On("GetUserProfile", uint(1)).Return(&models.UserProfile{
+					ID:        1,
+					UserID:    1,
+					Bloodline: &bloodline,
+					Weight:    &weight,
+					Height:    &height,
+					BMI:       &bmi,
+				}, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Profile patched successfully",

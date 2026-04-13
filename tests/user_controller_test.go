@@ -10,16 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
 	"diabetify/internal/controllers"
 	"diabetify/internal/models"
-	"diabetify/internal/services"
 	"diabetify/tests/mocks"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 // Test helper functions
@@ -29,12 +26,10 @@ func setupUserTestRouter() *gin.Engine {
 	return router
 }
 
-func setupUserControllerWithMocks() (*controllers.UserController, *mocks.MockUserRepository, *mocks.MockResetPasswordRepository) {
-	mockUserRepo := new(mocks.MockUserRepository)
-	mockResetPasswordRepo := new(mocks.MockResetPasswordRepository)
-	userService := services.NewUserService(mockUserRepo, mockResetPasswordRepo)
-	controller := controllers.NewUserController(userService)
-	return controller, mockUserRepo, mockResetPasswordRepo
+func setupUserControllerWithMocks() (*controllers.UserController, *mocks.MockUserService) {
+	mockUserService := new(mocks.MockUserService)
+	controller := controllers.NewUserController(mockUserService)
+	return controller, mockUserService
 }
 
 func addUserAuthMiddleware(userID uint) gin.HandlerFunc {
@@ -73,7 +68,7 @@ func TestLoginUser(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockUserRepository, *mocks.MockResetPasswordRepository)
+		setupMocks     func(*mocks.MockUserService)
 		expectedStatus int
 		expectedMsg    string
 		checkToken     bool
@@ -84,13 +79,14 @@ func TestLoginUser(t *testing.T) {
 				"email":    "john@example.com",
 				"password": testPassword,
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
+			setupMocks: func(mockService *mocks.MockUserService) {
 				user := &models.User{
 					ID:       1,
 					Email:    "john@example.com",
 					Password: testPasswordHash,
 				}
-				userRepo.On("GetUserByEmail", "john@example.com").Return(user, nil)
+				mockService.On("GetUserByEmail", "john@example.com").Return(user, nil)
+				mockService.On("VerifyPassword", testPasswordHash, testPassword).Return(true)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "User logged in successfully",
@@ -102,8 +98,8 @@ func TestLoginUser(t *testing.T) {
 				"email":    "nonexistent@example.com",
 				"password": "password123",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				userRepo.On("GetUserByEmail", "nonexistent@example.com").Return(nil, errors.New("user not found"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("GetUserByEmail", "nonexistent@example.com").Return(nil, errors.New("user not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "User not found",
@@ -115,13 +111,14 @@ func TestLoginUser(t *testing.T) {
 				"email":    "john@example.com",
 				"password": "wrongpassword",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
+			setupMocks: func(mockService *mocks.MockUserService) {
 				user := &models.User{
 					ID:       1,
 					Email:    "john@example.com",
 					Password: testPasswordHash,
 				}
-				userRepo.On("GetUserByEmail", "john@example.com").Return(user, nil)
+				mockService.On("GetUserByEmail", "john@example.com").Return(user, nil)
+				mockService.On("VerifyPassword", testPasswordHash, "wrongpassword").Return(false)
 			},
 			expectedStatus: http.StatusUnauthorized,
 			expectedMsg:    "Unauthorized",
@@ -133,7 +130,7 @@ func TestLoginUser(t *testing.T) {
 				"email": "john@example.com",
 				// Missing password
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
+			setupMocks: func(mockService *mocks.MockUserService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -144,8 +141,8 @@ func TestLoginUser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, userRepo, resetRepo := setupUserControllerWithMocks()
-			tt.setupMocks(userRepo, resetRepo)
+			controller, mockService := setupUserControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupUserTestRouter()
 			router.POST("/users/login", controller.LoginUser)
@@ -169,8 +166,7 @@ func TestLoginUser(t *testing.T) {
 				assert.IsType(t, "", response["data"])
 			}
 
-			userRepo.AssertExpectations(t)
-			resetRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -179,7 +175,7 @@ func TestGetCurrentUser(t *testing.T) {
 	tests := []struct {
 		name           string
 		userID         uint
-		setupMocks     func(*mocks.MockUserRepository, *mocks.MockResetPasswordRepository)
+		setupMocks     func(*mocks.MockUserService)
 		hasAuth        bool
 		expectedStatus int
 		expectedMsg    string
@@ -187,13 +183,13 @@ func TestGetCurrentUser(t *testing.T) {
 		{
 			name:   "successful get current user",
 			userID: 1,
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
+			setupMocks: func(mockService *mocks.MockUserService) {
 				user := &models.User{
 					ID:    1,
 					Name:  "John Doe",
 					Email: "john@example.com",
 				}
-				userRepo.On("GetUserByID", uint(1)).Return(user, nil)
+				mockService.On("GetUserByID", uint(1)).Return(user, nil)
 			},
 			hasAuth:        true,
 			expectedStatus: http.StatusOK,
@@ -202,8 +198,8 @@ func TestGetCurrentUser(t *testing.T) {
 		{
 			name:   "user not found",
 			userID: 999,
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				userRepo.On("GetUserByID", uint(999)).Return(nil, errors.New("user not found"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("GetUserByID", uint(999)).Return(nil, errors.New("user not found"))
 			},
 			hasAuth:        true,
 			expectedStatus: http.StatusNotFound,
@@ -212,7 +208,7 @@ func TestGetCurrentUser(t *testing.T) {
 		{
 			name:           "unauthorized - no user_id in context",
 			userID:         0,
-			setupMocks:     func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {},
+			setupMocks:     func(mockService *mocks.MockUserService) {},
 			hasAuth:        false,
 			expectedStatus: http.StatusUnauthorized,
 			expectedMsg:    "Unauthorized",
@@ -221,8 +217,8 @@ func TestGetCurrentUser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, userRepo, resetRepo := setupUserControllerWithMocks()
-			tt.setupMocks(userRepo, resetRepo)
+			controller, mockService := setupUserControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupUserTestRouter()
 			if tt.hasAuth {
@@ -242,8 +238,7 @@ func TestGetCurrentUser(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			userRepo.AssertExpectations(t)
-			resetRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -252,7 +247,7 @@ func TestForgotPassword(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockUserRepository, *mocks.MockResetPasswordRepository)
+		setupMocks     func(*mocks.MockUserService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -261,14 +256,8 @@ func TestForgotPassword(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "user@example.com",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				user := &models.User{
-					ID:    1,
-					Email: "user@example.com",
-				}
-				userRepo.On("GetUserByEmail", "user@example.com").Return(user, nil)
-				resetRepo.On("DeleteByEmail", "user@example.com").Return(nil)
-				resetRepo.On("CreateResetPassword", mock.AnythingOfType("*models.ResetPassword")).Return(nil)
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ForgotPassword", "user@example.com").Return("123456", nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Code sent successfully",
@@ -278,18 +267,18 @@ func TestForgotPassword(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "nonexistent@example.com",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				userRepo.On("GetUserByEmail", "nonexistent@example.com").Return(nil, errors.New("user not found"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ForgotPassword", "nonexistent@example.com").Return("", errors.New("user not found"))
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "Email's does not exist",
+			expectedMsg:    "Failed to process forgot password request",
 		},
 		{
 			name:        "invalid request data",
 			requestBody: map[string]interface{}{
 				// Missing email
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
+			setupMocks: func(mockService *mocks.MockUserService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -300,24 +289,18 @@ func TestForgotPassword(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"email": "user@example.com",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				user := &models.User{
-					ID:    1,
-					Email: "user@example.com",
-				}
-				userRepo.On("GetUserByEmail", "user@example.com").Return(user, nil)
-				resetRepo.On("DeleteByEmail", "user@example.com").Return(nil)
-				resetRepo.On("CreateResetPassword", mock.AnythingOfType("*models.ResetPassword")).Return(errors.New("database error"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ForgotPassword", "user@example.com").Return("", errors.New("database error"))
 			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedMsg:    "Failed to create forget password code",
+			expectedStatus: http.StatusBadRequest,
+			expectedMsg:    "Failed to process forgot password request",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, userRepo, resetRepo := setupUserControllerWithMocks()
-			tt.setupMocks(userRepo, resetRepo)
+			controller, mockService := setupUserControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupUserTestRouter()
 			router.POST("/users/forgot-password", controller.ForgotPassword)
@@ -336,8 +319,7 @@ func TestForgotPassword(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			userRepo.AssertExpectations(t)
-			resetRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -346,7 +328,7 @@ func TestResetPassword(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockUserRepository, *mocks.MockResetPasswordRepository)
+		setupMocks     func(*mocks.MockUserService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -357,21 +339,8 @@ func TestResetPassword(t *testing.T) {
 				"code":         "123456",
 				"new_password": "newpassword123",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				resetRecord := &models.ResetPassword{
-					Email:     "user@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-				}
-				resetRepo.On("FindByEmailAndCode", "user@example.com", "123456").Return(resetRecord, nil)
-
-				user := &models.User{
-					ID:    1,
-					Email: "user@example.com",
-				}
-				userRepo.On("GetUserByEmail", "user@example.com").Return(user, nil)
-				userRepo.On("UpdateUser", mock.AnythingOfType("*models.User")).Return(nil)
-				resetRepo.On("DeleteByEmail", "user@example.com").Return(nil)
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ResetPassword", "user@example.com", "123456", "newpassword123").Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Password has been reset successfully",
@@ -383,11 +352,11 @@ func TestResetPassword(t *testing.T) {
 				"code":         "wrong123",
 				"new_password": "newpassword123",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				resetRepo.On("FindByEmailAndCode", "user@example.com", "wrong123").Return(nil, errors.New("not found"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ResetPassword", "user@example.com", "wrong123", "newpassword123").Return(errors.New("invalid or expired verification code"))
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "Invalid or expired code",
+			expectedMsg:    "Failed to reset password",
 		},
 		{
 			name: "expired code",
@@ -396,16 +365,11 @@ func TestResetPassword(t *testing.T) {
 				"code":         "123456",
 				"new_password": "newpassword123",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				resetRecord := &models.ResetPassword{
-					Email:     "user@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(-10 * time.Minute), // Expired
-				}
-				resetRepo.On("FindByEmailAndCode", "user@example.com", "123456").Return(resetRecord, nil)
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ResetPassword", "user@example.com", "123456", "newpassword123").Return(errors.New("code has expired"))
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "Code has expired",
+			expectedMsg:    "Failed to reset password",
 		},
 		{
 			name: "password too short",
@@ -414,22 +378,11 @@ func TestResetPassword(t *testing.T) {
 				"code":         "123456",
 				"new_password": "short",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				resetRecord := &models.ResetPassword{
-					Email:     "user@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-				}
-				resetRepo.On("FindByEmailAndCode", "user@example.com", "123456").Return(resetRecord, nil)
-
-				user := &models.User{
-					ID:    1,
-					Email: "user@example.com",
-				}
-				userRepo.On("GetUserByEmail", "user@example.com").Return(user, nil)
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ResetPassword", "user@example.com", "123456", "short").Return(errors.New("password must be at least 8 characters"))
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "Password must be at least 8 characters",
+			expectedMsg:    "Failed to reset password",
 		},
 		{
 			name: "user not found",
@@ -438,17 +391,11 @@ func TestResetPassword(t *testing.T) {
 				"code":         "123456",
 				"new_password": "newpassword123",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				resetRecord := &models.ResetPassword{
-					Email:     "user@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-				}
-				resetRepo.On("FindByEmailAndCode", "user@example.com", "123456").Return(resetRecord, nil)
-				userRepo.On("GetUserByEmail", "user@example.com").Return(nil, errors.New("user not found"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ResetPassword", "user@example.com", "123456", "newpassword123").Return(errors.New("user not found"))
 			},
-			expectedStatus: http.StatusNotFound,
-			expectedMsg:    "User not found",
+			expectedStatus: http.StatusBadRequest,
+			expectedMsg:    "Failed to reset password",
 		},
 		{
 			name: "database error when updating password",
@@ -457,23 +404,11 @@ func TestResetPassword(t *testing.T) {
 				"code":         "123456",
 				"new_password": "newpassword123",
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
-				resetRecord := &models.ResetPassword{
-					Email:     "user@example.com",
-					Code:      "123456",
-					ExpiresAt: time.Now().Add(10 * time.Minute),
-				}
-				resetRepo.On("FindByEmailAndCode", "user@example.com", "123456").Return(resetRecord, nil)
-
-				user := &models.User{
-					ID:    1,
-					Email: "user@example.com",
-				}
-				userRepo.On("GetUserByEmail", "user@example.com").Return(user, nil)
-				userRepo.On("UpdateUser", mock.AnythingOfType("*models.User")).Return(errors.New("database error"))
+			setupMocks: func(mockService *mocks.MockUserService) {
+				mockService.On("ResetPassword", "user@example.com", "123456", "newpassword123").Return(errors.New("failed to update password"))
 			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedMsg:    "Failed to update password",
+			expectedStatus: http.StatusBadRequest,
+			expectedMsg:    "Failed to reset password",
 		},
 		{
 			name: "invalid request data",
@@ -482,7 +417,7 @@ func TestResetPassword(t *testing.T) {
 				"code":  "123456",
 				// Missing new_password
 			},
-			setupMocks: func(userRepo *mocks.MockUserRepository, resetRepo *mocks.MockResetPasswordRepository) {
+			setupMocks: func(mockService *mocks.MockUserService) {
 				// No mocks needed as validation will fail first
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -492,8 +427,8 @@ func TestResetPassword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, userRepo, resetRepo := setupUserControllerWithMocks()
-			tt.setupMocks(userRepo, resetRepo)
+			controller, mockService := setupUserControllerWithMocks()
+			tt.setupMocks(mockService)
 
 			router := setupUserTestRouter()
 			router.POST("/users/reset-password", controller.ResetPassword)
@@ -512,8 +447,7 @@ func TestResetPassword(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			userRepo.AssertExpectations(t)
-			resetRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }

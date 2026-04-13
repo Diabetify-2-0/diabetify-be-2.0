@@ -1,7 +1,6 @@
 package mocks
 
 import (
-	"context"
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
 	"time"
@@ -215,29 +214,6 @@ func (m *MockPredictionRepository) UpdatePrediction(prediction *models.Predictio
 	return args.Error(0)
 }
 
-// Shared MockMLClient
-type MockMLClient struct {
-	mock.Mock
-}
-
-func (m *MockMLClient) Predict(ctx context.Context, features []float64) (*models.PredictionResponse, error) {
-	args := m.Called(ctx, features)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.PredictionResponse), args.Error(1)
-}
-
-func (m *MockMLClient) HealthCheck(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *MockMLClient) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
 // MockResetPasswordRepository is a mock implementation of ResetPasswordRepository
 type MockResetPasswordRepository struct {
 	mock.Mock
@@ -384,43 +360,6 @@ func (m *MockPredictionJobRepository) IsJobOwnedByUser(jobID string, userID uint
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockMLClient) PredictAsync(ctx context.Context, jobID string, features []float64) error {
-	args := m.Called(ctx, jobID, features)
-	return args.Error(0)
-}
-
-func (m *MockMLClient) HealthCheckAsync(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-type MockPredictionJobWorker struct {
-	mock.Mock
-}
-
-func (m *MockPredictionJobWorker) Start() {
-	m.Called()
-}
-
-func (m *MockPredictionJobWorker) Stop() {
-	m.Called()
-}
-
-func (m *MockPredictionJobWorker) SubmitJob(jobRequest models.PredictionJobRequest) error {
-	args := m.Called(jobRequest)
-	return args.Error(0)
-}
-
-func (m *MockPredictionJobWorker) GetWhatIfResult(jobID string) (map[string]interface{}, bool, error) {
-	args := m.Called(jobID)
-	return args.Get(0).(map[string]interface{}), args.Bool(1), args.Error(2)
-}
-
-func (m *MockPredictionJobWorker) GetStatus() map[string]interface{} {
-	args := m.Called()
-	return args.Get(0).(map[string]interface{})
-}
-
 type MockCounterfactualJobRepository struct {
 	mock.Mock
 }
@@ -456,84 +395,4 @@ func (m *MockCounterfactualJobRepository) UpdateJobTerminalStatus(jobID, status 
 func (m *MockCounterfactualJobRepository) CancelJob(jobID string) error {
 	args := m.Called(jobID)
 	return args.Error(0)
-}
-
-type MockCounterfactualJobService struct {
-	mock.Mock
-}
-
-func (m *MockCounterfactualJobService) Start() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func (m *MockCounterfactualJobService) Stop() {
-	m.Called()
-}
-
-func (m *MockCounterfactualJobService) SubmitJob(jobID string, payload map[string]interface{}) error {
-	args := m.Called(jobID, payload)
-	return args.Error(0)
-}
-
-func (m *MockCounterfactualJobService) GetStatus() map[string]interface{} {
-	args := m.Called()
-	return args.Get(0).(map[string]interface{})
-}
-
-type MockUserProfileService struct {
-	mock.Mock
-}
-
-func (m *MockUserProfileService) GetUserProfile(userID uint) (*models.UserProfile, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.UserProfile), args.Error(1)
-}
-
-func (m *MockUserProfileService) CreateUserProfile(profile *models.UserProfile) (*models.UserProfile, error) {
-	args := m.Called(profile)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.UserProfile), args.Error(1)
-}
-
-func (m *MockUserProfileService) UpdateUserProfile(profile *models.UserProfile) (*models.UserProfile, error) {
-	args := m.Called(profile)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.UserProfile), args.Error(1)
-}
-
-func (m *MockUserProfileService) DeleteUserProfile(userID uint) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-
-func (m *MockUserProfileService) PatchUserProfile(userID uint, data map[string]interface{}) error {
-	args := m.Called(userID, data)
-	return args.Error(0)
-}
-
-type MockVerificationService struct {
-	mock.Mock
-}
-
-func (m *MockVerificationService) SendVerificationCode(email string) (string, error) {
-	args := m.Called(email)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockVerificationService) VerifyCode(email, code string) error {
-	args := m.Called(email, code)
-	return args.Error(0)
-}
-
-func (m *MockVerificationService) ResendVerificationCode(email string) (string, error) {
-	args := m.Called(email)
-	return args.String(0), args.Error(1)
 }
