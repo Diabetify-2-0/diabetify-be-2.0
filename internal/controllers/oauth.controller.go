@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"diabetify/internal/models"
-	"diabetify/internal/repository"
+	"diabetify/internal/services"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -13,11 +13,11 @@ import (
 )
 
 type OauthController struct {
-	userRepo repository.UserRepository
+	service services.OAuthService
 }
 
-func NewOauthController(userRepo repository.UserRepository) *OauthController {
-	return &OauthController{userRepo: userRepo}
+func NewOauthController(service services.OAuthService) *OauthController {
+	return &OauthController{service: service}
 }
 func (oc *OauthController) GoogleAuth(c *gin.Context) {
 	var authRequest struct {
@@ -73,7 +73,7 @@ func (oc *OauthController) GoogleAuth(c *gin.Context) {
 	}
 
 	name, _ := tokenInfo["name"].(string)
-	user, err := oc.userRepo.GetUserByEmail(email)
+	user, err := oc.service.GetUserByEmail(email)
 	isNewUser := err != nil
 
 	if isNewUser {
@@ -84,7 +84,7 @@ func (oc *OauthController) GoogleAuth(c *gin.Context) {
 			Password: "",
 		}
 
-		err = oc.userRepo.CreateUser(&newUser)
+		err = oc.service.CreateUser(&newUser)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"status":  "error",

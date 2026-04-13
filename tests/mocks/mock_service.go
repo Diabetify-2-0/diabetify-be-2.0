@@ -318,3 +318,21 @@ func (m *MockArticleService) SaveArticleImage(id uint, imageData []byte, mimeTyp
 	args := m.Called(id, imageData, mimeType)
 	return args.Error(0)
 }
+
+// MockOAuthService is a mock implementation of the oauth service
+type MockOAuthService struct {
+	mock.Mock
+}
+
+func (m *MockOAuthService) GetUserByEmail(email string) (*models.User, error) {
+	args := m.Called(email)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.User), args.Error(1)
+}
+
+func (m *MockOAuthService) CreateUser(user *models.User) error {
+	args := m.Called(user)
+	return args.Error(0)
+}
