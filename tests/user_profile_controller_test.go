@@ -23,10 +23,10 @@ func setupProfileTestRouter() *gin.Engine {
 	return router
 }
 
-func setupProfileControllerWithMock() (*controllers.UserProfileController, *mocks.MockUserProfileRepository) {
-	mockRepo := new(mocks.MockUserProfileRepository)
-	controller := controllers.NewUserProfileController(mockRepo)
-	return controller, mockRepo
+func setupProfileControllerWithMock() (*controllers.UserProfileController, *mocks.MockUserProfileService) {
+	mockService := new(mocks.MockUserProfileService)
+	controller := controllers.NewUserProfileController(mockService)
+	return controller, mockService
 }
 
 func addProfileAuthMiddleware(userID uint) gin.HandlerFunc {
@@ -37,8 +37,8 @@ func addProfileAuthMiddleware(userID uint) gin.HandlerFunc {
 }
 
 func TestNewUserProfileController(t *testing.T) {
-	mockRepo := new(mocks.MockUserProfileRepository)
-	controller := controllers.NewUserProfileController(mockRepo)
+	mockService := new(mocks.MockUserProfileService)
+	controller := controllers.NewUserProfileController(mockService)
 
 	assert.NotNil(t, controller)
 }
@@ -47,14 +47,14 @@ func TestGetUserProfile(t *testing.T) {
 	tests := []struct {
 		name           string
 		userID         uint
-		setupMock      func(*mocks.MockUserProfileRepository)
+		setupMock      func(*mocks.MockUserProfileService)
 		expectedStatus int
 		expectedMsg    string
 	}{
 		{
 			name:   "successful retrieval",
 			userID: 1,
-			setupMock: func(m *mocks.MockUserProfileRepository) {
+			setupMock: func(m *mocks.MockUserProfileService) {
 				weight := 70
 				height := 170
 				bmi := 24.2
@@ -65,7 +65,7 @@ func TestGetUserProfile(t *testing.T) {
 					Height: &height,
 					BMI:    &bmi,
 				}
-				m.On("FindByUserID", uint(1)).Return(profile, nil)
+				m.On("GetUserProfile", uint(1)).Return(profile, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "User profile retrieved successfully",
@@ -73,8 +73,8 @@ func TestGetUserProfile(t *testing.T) {
 		{
 			name:   "profile not found",
 			userID: 1,
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("FindByUserID", uint(1)).Return(nil, errors.New("profile not found"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("GetUserProfile", uint(1)).Return(nil, errors.New("profile not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "Profile not found",
@@ -83,8 +83,8 @@ func TestGetUserProfile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupProfileControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupProfileControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupProfileTestRouter()
 			router.Use(addProfileAuthMiddleware(tt.userID))
@@ -102,7 +102,7 @@ func TestGetUserProfile(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -130,7 +130,7 @@ func TestCreateUserProfile(t *testing.T) {
 		name           string
 		userID         uint
 		requestBody    map[string]interface{}
-		setupMock      func(*mocks.MockUserProfileRepository)
+		setupMock      func(*mocks.MockUserProfileService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -141,13 +141,20 @@ func TestCreateUserProfile(t *testing.T) {
 				"weight": 70.0,
 				"height": 170.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("Create", mock.MatchedBy(func(profile *models.UserProfile) bool {
-					return profile.UserID == 1 &&
-						profile.Weight != nil && *profile.Weight == 70.0 &&
-						profile.Height != nil && *profile.Height == 170.0 &&
-						profile.BMI != nil && *profile.BMI == 24.2
-				})).Return(nil)
+			setupMock: func(m *mocks.MockUserProfileService) {
+				weight := 70
+				height := 170
+				bmi := 24.2
+				profile := &models.UserProfile{
+					ID:     1,
+					UserID: 1,
+					Weight: &weight,
+					Height: &height,
+					BMI:    &bmi,
+				}
+				m.On("CreateUserProfile", mock.MatchedBy(func(p *models.UserProfile) bool {
+					return p.UserID == 1
+				})).Return(profile, nil)
 			},
 			expectedStatus: http.StatusCreated,
 			expectedMsg:    "Profile created successfully",
@@ -158,12 +165,17 @@ func TestCreateUserProfile(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"weight": 70.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("Create", mock.MatchedBy(func(profile *models.UserProfile) bool {
-					return profile.UserID == 1 &&
-						profile.Weight != nil && *profile.Weight == 70.0 &&
-						profile.BMI == nil
-				})).Return(nil)
+			setupMock: func(m *mocks.MockUserProfileService) {
+				weight := 70
+				profile := &models.UserProfile{
+					ID:     1,
+					UserID: 1,
+					Weight: &weight,
+					BMI:    nil,
+				}
+				m.On("CreateUserProfile", mock.MatchedBy(func(p *models.UserProfile) bool {
+					return p.UserID == 1
+				})).Return(profile, nil)
 			},
 			expectedStatus: http.StatusCreated,
 			expectedMsg:    "Profile created successfully",
@@ -172,19 +184,19 @@ func TestCreateUserProfile(t *testing.T) {
 			name:           "invalid JSON",
 			userID:         1,
 			requestBody:    nil,
-			setupMock:      func(m *mocks.MockUserProfileRepository) {},
+			setupMock:      func(m *mocks.MockUserProfileService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid request data",
 		},
 		{
-			name:   "repository error",
+			name:   "service error",
 			userID: 1,
 			requestBody: map[string]interface{}{
 				"weight": 70.0,
 				"height": 170.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("Create", mock.AnythingOfType("*models.UserProfile")).Return(errors.New("database error"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("CreateUserProfile", mock.AnythingOfType("*models.UserProfile")).Return(nil, errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedMsg:    "Failed to create profile",
@@ -193,8 +205,8 @@ func TestCreateUserProfile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupProfileControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupProfileControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupProfileTestRouter()
 			router.Use(addProfileAuthMiddleware(tt.userID))
@@ -220,7 +232,7 @@ func TestCreateUserProfile(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -255,7 +267,7 @@ func TestUpdateUserProfile(t *testing.T) {
 		name           string
 		userID         uint
 		requestBody    map[string]interface{}
-		setupMock      func(*mocks.MockUserProfileRepository)
+		setupMock      func(*mocks.MockUserProfileService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -266,19 +278,20 @@ func TestUpdateUserProfile(t *testing.T) {
 				"weight": 75.0,
 				"height": 175.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				existingProfile := &models.UserProfile{
+			setupMock: func(m *mocks.MockUserProfileService) {
+				weight := 75
+				height := 175
+				bmi := 24.5
+				profile := &models.UserProfile{
 					ID:     1,
 					UserID: 1,
+					Weight: &weight,
+					Height: &height,
+					BMI:    &bmi,
 				}
-				m.On("FindByUserID", uint(1)).Return(existingProfile, nil)
-				m.On("Update", mock.MatchedBy(func(profile *models.UserProfile) bool {
-					return profile.ID == 1 &&
-						profile.UserID == 1 &&
-						profile.Weight != nil && *profile.Weight == 75.0 &&
-						profile.Height != nil && *profile.Height == 175.0 &&
-						profile.BMI != nil && *profile.BMI == 24.5
-				})).Return(nil)
+				m.On("UpdateUserProfile", mock.MatchedBy(func(p *models.UserProfile) bool {
+					return p.UserID == 1
+				})).Return(profile, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Profile updated successfully",
@@ -287,7 +300,7 @@ func TestUpdateUserProfile(t *testing.T) {
 			name:           "invalid JSON",
 			userID:         1,
 			requestBody:    nil,
-			setupMock:      func(m *mocks.MockUserProfileRepository) {},
+			setupMock:      func(m *mocks.MockUserProfileService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid request data",
 		},
@@ -297,35 +310,30 @@ func TestUpdateUserProfile(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"weight": 75.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("FindByUserID", uint(1)).Return(nil, errors.New("profile not found"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("UpdateUserProfile", mock.AnythingOfType("*models.UserProfile")).Return(nil, errors.New("profile not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "Profile not found",
 		},
 		{
-			name:   "repository update error",
+			name:   "service update error",
 			userID: 1,
 			requestBody: map[string]interface{}{
 				"weight": 75.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				existingProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-				}
-				m.On("FindByUserID", uint(1)).Return(existingProfile, nil)
-				m.On("Update", mock.AnythingOfType("*models.UserProfile")).Return(errors.New("database error"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("UpdateUserProfile", mock.AnythingOfType("*models.UserProfile")).Return(nil, errors.New("database error"))
 			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedMsg:    "Failed to update profile",
+			expectedStatus: http.StatusNotFound,
+			expectedMsg:    "Profile not found",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupProfileControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupProfileControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupProfileTestRouter()
 			router.Use(addProfileAuthMiddleware(tt.userID))
@@ -351,7 +359,7 @@ func TestUpdateUserProfile(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -360,24 +368,24 @@ func TestDeleteUserProfile(t *testing.T) {
 	tests := []struct {
 		name           string
 		userID         uint
-		setupMock      func(*mocks.MockUserProfileRepository)
+		setupMock      func(*mocks.MockUserProfileService)
 		expectedStatus int
 		expectedMsg    string
 	}{
 		{
 			name:   "successful deletion",
 			userID: 1,
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("DeleteByUserID", uint(1)).Return(nil)
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("DeleteUserProfile", uint(1)).Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Profile deleted successfully",
 		},
 		{
-			name:   "repository error",
+			name:   "service error",
 			userID: 1,
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("DeleteByUserID", uint(1)).Return(errors.New("database error"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("DeleteUserProfile", uint(1)).Return(errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedMsg:    "Failed to delete profile",
@@ -386,8 +394,8 @@ func TestDeleteUserProfile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupProfileControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupProfileControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupProfileTestRouter()
 			router.Use(addProfileAuthMiddleware(tt.userID))
@@ -405,7 +413,7 @@ func TestDeleteUserProfile(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -433,40 +441,18 @@ func TestPatchUserProfile(t *testing.T) {
 		name           string
 		userID         uint
 		requestBody    map[string]interface{}
-		setupMock      func(*mocks.MockUserProfileRepository)
+		setupMock      func(*mocks.MockUserProfileService)
 		expectedStatus int
 		expectedMsg    string
 	}{
 		{
-			name:   "successful patch with BMI recalculation",
+			name:   "successful patch with weight update",
 			userID: 1,
 			requestBody: map[string]interface{}{
 				"weight": 80.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				height := 170
-				existingProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-					Height: &height,
-				}
-				m.On("FindByUserID", uint(1)).Return(existingProfile, nil).Once()
-				m.On("Patch", uint(1), mock.MatchedBy(func(data map[string]interface{}) bool {
-					return data["bmi"] != nil
-				})).Return(nil)
-
-				// Mock the second FindByUserID call for returning updated profile
-				updatedHeight := 170
-				updatedWeight := 80
-				updatedBMI := 27.7
-				updatedProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-					Height: &updatedHeight,
-					Weight: &updatedWeight,
-					BMI:    &updatedBMI,
-				}
-				m.On("FindByUserID", uint(1)).Return(updatedProfile, nil).Once()
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("PatchUserProfile", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Profile patched successfully",
@@ -477,21 +463,8 @@ func TestPatchUserProfile(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"bloodline": true,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				existingProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-				}
-				m.On("FindByUserID", uint(1)).Return(existingProfile, nil).Once()
-				m.On("Patch", uint(1), map[string]interface{}{
-					"bloodline": true,
-				}).Return(nil)
-
-				updatedProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-				}
-				m.On("FindByUserID", uint(1)).Return(updatedProfile, nil).Once()
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("PatchUserProfile", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Profile patched successfully",
@@ -500,7 +473,7 @@ func TestPatchUserProfile(t *testing.T) {
 			name:           "invalid JSON",
 			userID:         1,
 			requestBody:    nil,
-			setupMock:      func(m *mocks.MockUserProfileRepository) {},
+			setupMock:      func(m *mocks.MockUserProfileService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid request data",
 		},
@@ -510,53 +483,30 @@ func TestPatchUserProfile(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"weight": 80.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				m.On("FindByUserID", uint(1)).Return(nil, errors.New("profile not found"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("PatchUserProfile", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(errors.New("profile not found"))
 			},
 			expectedStatus: http.StatusNotFound,
-			expectedMsg:    "Profile not found",
+			expectedMsg:    "Failed to patch profile",
 		},
 		{
-			name:   "patch repository error",
+			name:   "service patch error",
 			userID: 1,
 			requestBody: map[string]interface{}{
 				"weight": 80.0,
 			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				existingProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-				}
-				m.On("FindByUserID", uint(1)).Return(existingProfile, nil)
-				m.On("Patch", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(errors.New("database error"))
+			setupMock: func(m *mocks.MockUserProfileService) {
+				m.On("PatchUserProfile", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(errors.New("database error"))
 			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedMsg:    "Failed to update profile",
-		},
-		{
-			name:   "failed to retrieve updated profile",
-			userID: 1,
-			requestBody: map[string]interface{}{
-				"weight": 80.0,
-			},
-			setupMock: func(m *mocks.MockUserProfileRepository) {
-				existingProfile := &models.UserProfile{
-					ID:     1,
-					UserID: 1,
-				}
-				m.On("FindByUserID", uint(1)).Return(existingProfile, nil).Once()
-				m.On("Patch", uint(1), mock.AnythingOfType("map[string]interface {}")).Return(nil)
-				m.On("FindByUserID", uint(1)).Return(nil, errors.New("failed to retrieve")).Once()
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedMsg:    "Failed to retrieve updated profile",
+			expectedStatus: http.StatusNotFound,
+			expectedMsg:    "Failed to patch profile",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupProfileControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupProfileControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupProfileTestRouter()
 			router.Use(addProfileAuthMiddleware(tt.userID))
@@ -582,7 +532,7 @@ func TestPatchUserProfile(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }

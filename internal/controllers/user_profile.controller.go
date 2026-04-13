@@ -2,18 +2,18 @@ package controllers
 
 import (
 	"diabetify/internal/models"
-	"diabetify/internal/repository"
+	"diabetify/internal/services"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 type UserProfileController struct {
-	repo repository.UserProfileRepository
+	service services.UserProfileService
 }
 
-func NewUserProfileController(repo repository.UserProfileRepository) *UserProfileController {
-	return &UserProfileController{repo: repo}
+func NewUserProfileController(service services.UserProfileService) *UserProfileController {
+	return &UserProfileController{service: service}
 }
 
 // GetUserProfile godoc
@@ -39,13 +39,13 @@ func (pc *UserProfileController) GetUserProfile(c *gin.Context) {
 		return
 	}
 
-	// Find the profile
-	profile, err := pc.repo.FindByUserID(userID.(uint))
+	// Call service to get profile
+	profile, err := pc.service.GetUserProfile(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
 			"message": "Profile not found",
-			"error":   "No profile exists for this user",
+			"error":   err.Error(),
 		})
 		return
 	}
@@ -95,13 +95,9 @@ func (pc *UserProfileController) CreateUserProfile(c *gin.Context) {
 
 	profile.UserID = userID.(uint)
 
-	if profile.Weight != nil && profile.Height != nil && *profile.Height > 0 {
-		heightInMeters := float64(*profile.Height) / 100.0
-		bmi := float64(*profile.Weight) / (heightInMeters * heightInMeters)
-		profile.BMI = &bmi
-	}
-
-	if err := pc.repo.Create(&profile); err != nil {
+	// Call service to create profile (service handles BMI calculation)
+	createdProfile, err := pc.service.CreateUserProfile(&profile)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to create profile",
@@ -113,7 +109,7 @@ func (pc *UserProfileController) CreateUserProfile(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"status":  "success",
 		"message": "Profile created successfully",
-		"data":    profile,
+		"data":    createdProfile,
 	})
 }
 
@@ -153,32 +149,14 @@ func (pc *UserProfileController) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	// Get existing profile
-	existingProfile, err := pc.repo.FindByUserID(userID.(uint))
+	updatedProfile.UserID = userID.(uint)
+
+	// Call service to update profile (service handles BMI recalculation and validation)
+	profile, err := pc.service.UpdateUserProfile(&updatedProfile)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
 			"message": "Profile not found",
-			"error":   "No profile exists for this user",
-		})
-		return
-	}
-
-	// Update fields
-	updatedProfile.ID = existingProfile.ID
-	updatedProfile.UserID = userID.(uint)
-
-	// Recalculate BMI if weight and height are provided
-	if updatedProfile.Weight != nil && updatedProfile.Height != nil && *updatedProfile.Height > 0 {
-		heightInMeters := float64(*updatedProfile.Height) / 100.0
-		bmi := float64(*updatedProfile.Weight) / (heightInMeters * heightInMeters)
-		updatedProfile.BMI = &bmi
-	}
-
-	if err := pc.repo.Update(&updatedProfile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to update profile",
 			"error":   err.Error(),
 		})
 		return
@@ -187,7 +165,7 @@ func (pc *UserProfileController) UpdateUserProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Profile updated successfully",
-		"data":    updatedProfile,
+		"data":    profile,
 	})
 }
 
@@ -213,7 +191,8 @@ func (pc *UserProfileController) DeleteUserProfile(c *gin.Context) {
 		return
 	}
 
-	if err := pc.repo.DeleteByUserID(userID.(uint)); err != nil {
+	// Call service to delete profile
+	if err := pc.service.DeleteUserProfile(userID.(uint)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to delete profile",
@@ -264,63 +243,17 @@ func (pc *UserProfileController) PatchUserProfile(c *gin.Context) {
 		return
 	}
 
-	existingProfile, err := pc.repo.FindByUserID(userID.(uint))
-	if err != nil {
+	// Call service to patch profile (service handles BMI recalculation if needed)
+	if err := pc.service.PatchUserProfile(userID.(uint), patchData); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
-			"message": "Profile not found",
-			"error":   "No profile exists for this user",
-		})
-		return
-	}
-
-	recalculateBMI := false
-	var weight float64
-	var height float64
-
-	if weightVal, ok := patchData["weight"]; ok {
-		if w, ok := weightVal.(float64); ok {
-			weight = w
-			if existingProfile.Height != nil {
-				height = float64(*existingProfile.Height)
-				recalculateBMI = true
-			}
-		}
-	} else if existingProfile.Weight != nil {
-		weight = float64(*existingProfile.Weight)
-	}
-
-	if heightVal, ok := patchData["height"]; ok {
-		if h, ok := heightVal.(float64); ok {
-			height = h
-			if existingProfile.Weight != nil || patchData["weight"] != nil {
-				if !recalculateBMI {
-					weight = float64(*existingProfile.Weight)
-				}
-				recalculateBMI = true
-			}
-		}
-	} else if existingProfile.Height != nil {
-		height = float64(*existingProfile.Height)
-	}
-
-	if recalculateBMI && height > 0 {
-		heightInMeters := height / 100.0
-		bmi := weight / (heightInMeters * heightInMeters)
-		bmiValue := float64(bmi)
-		patchData["bmi"] = bmiValue
-	}
-
-	if err := pc.repo.Patch(userID.(uint), patchData); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to update profile",
+			"message": "Failed to patch profile",
 			"error":   err.Error(),
 		})
 		return
 	}
 
-	updatedProfile, err := pc.repo.FindByUserID(userID.(uint))
+	updatedProfile, err := pc.service.GetUserProfile(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",

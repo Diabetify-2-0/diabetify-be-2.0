@@ -155,13 +155,14 @@ func main() {
 
 	// Initialize services
 	userService := services.NewUserService(userRepo, forgotPasswordRepo)
+	profileService := services.NewUserProfileService(profileRepo)
 
 	// Initialize controllers
 	userController := controllers.NewUserController(userService)
 	verificationController := controllers.NewVerificationController(verificationRepo, userRepo)
 	oauthController := controllers.NewOauthController(userRepo)
 	activityController := controllers.NewActivityController(activityRepo)
-	profileController := controllers.NewUserProfileController(profileRepo)
+	profileController := controllers.NewUserProfileController(profileService)
 
 	// UNIFIED Prediction Controller (handles both sync and async via job worker)
 	predictionController := controllers.NewPredictionController(

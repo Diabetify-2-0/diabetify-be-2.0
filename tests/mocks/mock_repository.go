@@ -480,3 +480,41 @@ func (m *MockCounterfactualJobService) GetStatus() map[string]interface{} {
 	args := m.Called()
 	return args.Get(0).(map[string]interface{})
 }
+
+type MockUserProfileService struct {
+	mock.Mock
+}
+
+func (m *MockUserProfileService) GetUserProfile(userID uint) (*models.UserProfile, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.UserProfile), args.Error(1)
+}
+
+func (m *MockUserProfileService) CreateUserProfile(profile *models.UserProfile) (*models.UserProfile, error) {
+	args := m.Called(profile)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.UserProfile), args.Error(1)
+}
+
+func (m *MockUserProfileService) UpdateUserProfile(profile *models.UserProfile) (*models.UserProfile, error) {
+	args := m.Called(profile)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.UserProfile), args.Error(1)
+}
+
+func (m *MockUserProfileService) DeleteUserProfile(userID uint) error {
+	args := m.Called(userID)
+	return args.Error(0)
+}
+
+func (m *MockUserProfileService) PatchUserProfile(userID uint, data map[string]interface{}) error {
+	args := m.Called(userID, data)
+	return args.Error(0)
+}
