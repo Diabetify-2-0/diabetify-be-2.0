@@ -1,13 +1,9 @@
 package controllers
 
 import (
-	"bytes"
-	"crypto/rand"
-	"crypto/sha256"
 	"diabetify/internal/models"
-	"diabetify/internal/repository"
+	"diabetify/internal/services"
 	"diabetify/internal/utils"
-	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
@@ -19,12 +15,13 @@ import (
 )
 
 type UserController struct {
-	repo    repository.UserRepository
-	rp_repo repository.ResetPasswordRepository
+	service services.UserService
 }
 
-func NewUserController(repo repository.UserRepository, rp_repo repository.ResetPasswordRepository) *UserController {
-	return &UserController{repo: repo, rp_repo: rp_repo}
+func NewUserController(service services.UserService) *UserController {
+	return &UserController{
+		service: service,
+	}
 }
 
 type LoginRequest struct {
@@ -51,46 +48,6 @@ type RegisterUserRequest struct {
 	Role     string  `json:"role" binding:"required,oneof=USER DATA_SCIENTIST MEDICAL_EXPERT"`
 }
 
-func hashPassword(password string) (string, error) {
-	salt := make([]byte, 8)
-	_, err := rand.Read(salt)
-	if err != nil {
-		return "", err
-	}
-
-	// SHA256
-	h := sha256.New()
-	h.Write([]byte(password))
-	h.Write(salt)
-	hash := h.Sum(nil)
-
-	return hex.EncodeToString(salt) + hex.EncodeToString(hash), nil
-}
-
-// Verify password
-func verifyPassword(hashedPassword, password string) bool {
-	if len(hashedPassword) < 16 {
-		return false
-	}
-
-	salt, err := hex.DecodeString(hashedPassword[:16])
-	if err != nil {
-		return false
-	}
-
-	expectedHash, err := hex.DecodeString(hashedPassword[16:])
-	if err != nil {
-		return false
-	}
-
-	h := sha256.New()
-	h.Write([]byte(password))
-	h.Write(salt)
-	hash := h.Sum(nil)
-
-	return bytes.Equal(hash, expectedHash)
-}
-
 // RegisterUser godoc
 // @Summary Register a new user
 // @Description Register a new user with role: USER, DATA_SCIENTIST, or MEDICAL_EXPERT
@@ -114,38 +71,10 @@ func (uc *UserController) RegisterUser(c *gin.Context) {
 		return
 	}
 
-	hashedPassword, err := hashPassword(req.Password)
+	// Call service to create user (validation, password hashing, email duplicate check)
+	user, err := uc.service.CreateUser(req.Email, req.Password, req.Name, req.Role, req.Gender, req.DOB)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to hash password",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	// Check if email already exists
-	if _, err := uc.repo.GetUserByEmail(req.Email); err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Email already in use",
-			"error":   "Email address is already registered",
-		})
-		return
-	}
-
-	user := models.User{
-		Name:     req.Name,
-		Email:    req.Email,
-		Password: hashedPassword,
-		Gender:   req.Gender,
-		DOB:      req.DOB,
-		Role:     req.Role,
-		Verified: false,
-	}
-
-	if err := uc.repo.CreateUser(&user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to create user",
 			"error":   err.Error(),
@@ -196,7 +125,7 @@ func (uc *UserController) GetUserByID(c *gin.Context) {
 		return
 	}
 
-	user, err := uc.repo.GetUserByID(uint(id))
+	user, err := uc.service.GetUserByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -238,7 +167,7 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	existingUser, err := uc.repo.GetUserByID(userID.(uint))
+	existingUser, err := uc.service.GetUserByID(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -261,32 +190,9 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 	// Set the user ID from the JWT token
 	user.ID = userID.(uint)
 
-	// Handle password hashing if password is provided
-	if user.Password != "" {
-		if len(user.Password) < 8 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"status":  "error",
-				"message": "Password must be at least 8 characters",
-				"error":   "Invalid password",
-			})
-			return
-		}
-
-		hashedPassword, err := hashPassword(user.Password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "Failed to hash password",
-				"error":   "Internal server error",
-			})
-			return
-		}
-		user.Password = hashedPassword
-	}
-
 	// Prevent changing email to one that already exists
 	if user.Email != "" && user.Email != existingUser.Email {
-		_, err := uc.repo.GetUserByEmail(user.Email)
+		_, err := uc.service.GetUserByEmail(user.Email)
 		if err == nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"status":  "error",
@@ -297,11 +203,12 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		}
 	}
 
-	if err := uc.repo.UpdateUser(&user); err != nil {
+	// Service will handle password hashing and validation
+	if err := uc.service.UpdateUser(&user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to update user",
-			"error":   "Database update failed",
+			"error":   err.Error(),
 		})
 		return
 	}
@@ -336,11 +243,11 @@ func (uc *UserController) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	if err := uc.repo.DeleteUser(uint(id)); err != nil {
+	if err := uc.service.DeleteUser(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to delete user",
-			"error":   "Database deletion failed",
+			"error":   err.Error(),
 		})
 		return
 	}
@@ -375,7 +282,7 @@ func (uc *UserController) LoginUser(c *gin.Context) {
 		return
 	}
 
-	user, err := uc.repo.GetUserByEmail(loginRequest.Email)
+	user, err := uc.service.GetUserByEmail(loginRequest.Email)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -385,8 +292,8 @@ func (uc *UserController) LoginUser(c *gin.Context) {
 		return
 	}
 
-	// Use simple SHA256
-	if !verifyPassword(user.Password, loginRequest.Password) {
+	// Verify password using service
+	if !uc.service.VerifyPassword(user.Password, loginRequest.Password) {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"status":  "error",
 			"message": "Unauthorized",
@@ -440,36 +347,20 @@ func (uc *UserController) ForgotPassword(c *gin.Context) {
 		return
 	}
 
-	if _, err := uc.repo.GetUserByEmail(req.Email); err != nil {
+	// Call service to generate reset code
+	code, err := uc.service.ForgotPassword(req.Email)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
-			"message": "Email's does not exist",
+			"message": "Failed to process forgot password request",
 			"error":   err.Error(),
 		})
 		return
 	}
 
 	mailConfig := utils.LoadMailConfig()
-	code := utils.GenerateVerificationCode()
 
-	// Delete if any code from the previous one still exist
-	uc.rp_repo.DeleteByEmail(req.Email)
-
-	forget_password := &models.ResetPassword{
-		Email:     req.Email,
-		Code:      code,
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-	}
-
-	if err := uc.rp_repo.CreateResetPassword(forget_password); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to create forget password code",
-			"error":   "Database error",
-		})
-		return
-	}
-
+	// Send email asynchronously
 	go func() {
 		if err := utils.SendEmail(mailConfig, req.Email, "Reset Password", "Use this code to reset your password :  "+code); err != nil {
 			log.Printf("Failed to send email to %s: %v", req.Email, err)
@@ -506,69 +397,15 @@ func (uc *UserController) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	resetRecord, err := uc.rp_repo.FindByEmailAndCode(req.Email, req.Code)
-	if err != nil {
+	// Call service to reset password
+	if err := uc.service.ResetPassword(req.Email, req.Code, req.NewPassword); err != nil {
+		// Determine if it's a validation error or not found error
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
-			"message": "Invalid or expired code",
-			"error":   "Code not found",
+			"message": "Failed to reset password",
+			"error":   err.Error(),
 		})
 		return
-	}
-
-	if time.Now().After(resetRecord.ExpiresAt) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Code has expired",
-			"error":   "Expired code",
-		})
-		return
-	}
-
-	user, err := uc.repo.GetUserByEmail(req.Email)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"status":  "error",
-			"message": "User not found",
-			"error":   "User does not exist",
-		})
-		return
-	}
-
-	// Validate password
-	if len(req.NewPassword) < 8 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Password must be at least 8 characters",
-			"error":   "Invalid password",
-		})
-		return
-	}
-
-	// Hash the new password with simple SHA256
-	hashedPassword, err := hashPassword(req.NewPassword)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to hash password",
-			"error":   "Internal server error",
-		})
-		return
-	}
-
-	user.Password = hashedPassword
-	if err := uc.repo.UpdateUser(user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to update password",
-			"error":   "Database error",
-		})
-		return
-	}
-
-	// Delete reset password code
-	if err := uc.rp_repo.DeleteByEmail(req.Email); err != nil {
-		log.Printf("Failed to delete reset password code for %s: %v", req.Email, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -605,7 +442,7 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 	}
 
 	// Check if the user exists
-	existingUser, err := uc.repo.GetUserByID(userID.(uint))
+	existingUser, err := uc.service.GetUserByID(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -626,34 +463,10 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 		return
 	}
 
-	// Handle password update specially if it's included
-	if password, ok := patchData["password"].(string); ok {
-		if len(password) < 8 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"status":  "error",
-				"message": "Password must be at least 8 characters",
-				"error":   "Invalid password",
-			})
-			return
-		}
-
-		// Hash the new password with simple SHA256
-		hashedPassword, err := hashPassword(password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "Failed to hash password",
-				"error":   "Internal server error",
-			})
-			return
-		}
-		patchData["password"] = hashedPassword
-	}
-
 	// Prevent changing email to one that already exists
 	if email, hasEmail := patchData["email"].(string); hasEmail && email != existingUser.Email {
 		// Check if email already exists
-		_, err := uc.repo.GetUserByEmail(email)
+		_, err := uc.service.GetUserByEmail(email)
 		if err == nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"status":  "error",
@@ -664,8 +477,8 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 		}
 	}
 
-	// Apply the patch to the user
-	if err := uc.repo.PatchUser(userID.(uint), patchData); err != nil {
+	// Apply the patch to the user through service (handles password hashing)
+	if err := uc.service.PatchUser(userID.(uint), patchData); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to update user",
@@ -675,7 +488,7 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 	}
 
 	// Get the updated user
-	updatedUser, err := uc.repo.GetUserByID(userID.(uint))
+	updatedUser, err := uc.service.GetUserByID(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -718,7 +531,7 @@ func (uc *UserController) GetCurrentUser(c *gin.Context) {
 	}
 
 	// Retrieve the user
-	user, err := uc.repo.GetUserByID(userID.(uint))
+	user, err := uc.service.GetUserByID(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",

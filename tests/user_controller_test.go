@@ -14,6 +14,7 @@ import (
 
 	"diabetify/internal/controllers"
 	"diabetify/internal/models"
+	"diabetify/internal/services"
 	"diabetify/tests/mocks"
 
 	"github.com/gin-gonic/gin"
@@ -31,7 +32,8 @@ func setupUserTestRouter() *gin.Engine {
 func setupUserControllerWithMocks() (*controllers.UserController, *mocks.MockUserRepository, *mocks.MockResetPasswordRepository) {
 	mockUserRepo := new(mocks.MockUserRepository)
 	mockResetPasswordRepo := new(mocks.MockResetPasswordRepository)
-	controller := controllers.NewUserController(mockUserRepo, mockResetPasswordRepo)
+	userService := services.NewUserService(mockUserRepo, mockResetPasswordRepo)
+	controller := controllers.NewUserController(userService)
 	return controller, mockUserRepo, mockResetPasswordRepo
 }
 

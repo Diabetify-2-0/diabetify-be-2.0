@@ -153,8 +153,11 @@ func main() {
 	}
 	defer counterfactualJobService.Stop()
 
+	// Initialize services
+	userService := services.NewUserService(userRepo, forgotPasswordRepo)
+
 	// Initialize controllers
-	userController := controllers.NewUserController(userRepo, forgotPasswordRepo)
+	userController := controllers.NewUserController(userService)
 	verificationController := controllers.NewVerificationController(verificationRepo, userRepo)
 	oauthController := controllers.NewOauthController(userRepo)
 	activityController := controllers.NewActivityController(activityRepo)
