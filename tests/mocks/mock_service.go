@@ -3,6 +3,7 @@ package mocks
 import (
 	"context"
 	"diabetify/internal/models"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -213,4 +214,53 @@ func (m *MockVerificationService) VerifyCode(email, code string) error {
 func (m *MockVerificationService) ResendVerificationCode(email string) (string, error) {
 	args := m.Called(email)
 	return args.String(0), args.Error(1)
+}
+
+// MockActivityService is a mock implementation of the activity service
+type MockActivityService struct {
+	mock.Mock
+}
+
+func (m *MockActivityService) CreateActivity(activity *models.Activity) error {
+	args := m.Called(activity)
+	return args.Error(0)
+}
+
+func (m *MockActivityService) GetActivityByID(id uint) (*models.Activity, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Activity), args.Error(1)
+}
+
+func (m *MockActivityService) GetCurrentUserActivities(userID uint, limit int) ([]models.Activity, error) {
+	args := m.Called(userID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.Activity), args.Error(1)
+}
+
+func (m *MockActivityService) GetActivitiesByDateRange(userID uint, startDate, endDate time.Time) ([]models.Activity, error) {
+	args := m.Called(userID, startDate, endDate)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.Activity), args.Error(1)
+}
+
+func (m *MockActivityService) UpdateActivity(activity *models.Activity) error {
+	args := m.Called(activity)
+	return args.Error(0)
+}
+
+func (m *MockActivityService) DeleteActivity(id uint) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *MockActivityService) CountUserActivities(userID uint) (int64, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int64), args.Error(1)
 }

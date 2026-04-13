@@ -25,10 +25,10 @@ func setupTestRouter() *gin.Engine {
 	return router
 }
 
-func setupControllerWithMock() (*controllers.ActivityController, *mocks.MockActivityRepository) {
-	mockRepo := new(mocks.MockActivityRepository)
-	controller := controllers.NewActivityController(mockRepo)
-	return controller, mockRepo
+func setupControllerWithMock() (*controllers.ActivityController, *mocks.MockActivityService) {
+	mockService := new(mocks.MockActivityService)
+	controller := controllers.NewActivityController(mockService)
+	return controller, mockService
 }
 
 func addAuthMiddleware(userID uint) gin.HandlerFunc {
@@ -39,8 +39,8 @@ func addAuthMiddleware(userID uint) gin.HandlerFunc {
 }
 
 func TestNewActivityController(t *testing.T) {
-	mockRepo := new(mocks.MockActivityRepository)
-	controller := controllers.NewActivityController(mockRepo)
+	mockService := new(mocks.MockActivityService)
+	controller := controllers.NewActivityController(mockService)
 
 	assert.NotNil(t, controller)
 }
@@ -50,7 +50,7 @@ func TestCreateActivity(t *testing.T) {
 		name           string
 		userID         uint
 		requestBody    map[string]interface{}
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -62,8 +62,8 @@ func TestCreateActivity(t *testing.T) {
 				"value":         30,
 				"activity_date": "2024-01-01T10:00:00Z",
 			},
-			setupMock: func(m *mocks.MockActivityRepository) {
-				m.On("Create", mock.AnythingOfType("*models.Activity")).Return(nil)
+			setupMock: func(m *mocks.MockActivityService) {
+				m.On("CreateActivity", mock.AnythingOfType("*models.Activity")).Return(nil)
 			},
 			expectedStatus: http.StatusCreated,
 			expectedMsg:    "Activity created successfully",
@@ -75,7 +75,7 @@ func TestCreateActivity(t *testing.T) {
 				"value":         30,
 				"activity_date": "2024-01-01T10:00:00Z",
 			},
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Activity type is required",
 		},
@@ -83,7 +83,7 @@ func TestCreateActivity(t *testing.T) {
 			name:           "invalid JSON",
 			userID:         1,
 			requestBody:    nil,
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid request data",
 		},
@@ -95,8 +95,8 @@ func TestCreateActivity(t *testing.T) {
 				"value":         30,
 				"activity_date": "2024-01-01T10:00:00Z",
 			},
-			setupMock: func(m *mocks.MockActivityRepository) {
-				m.On("Create", mock.AnythingOfType("*models.Activity")).Return(errors.New("database error"))
+			setupMock: func(m *mocks.MockActivityService) {
+				m.On("CreateActivity", mock.AnythingOfType("*models.Activity")).Return(errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedMsg:    "Failed to create activity",
@@ -105,8 +105,8 @@ func TestCreateActivity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -132,7 +132,7 @@ func TestCreateActivity(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -167,7 +167,7 @@ func TestGetCurrentUserActivities(t *testing.T) {
 		name           string
 		userID         uint
 		limit          string
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -175,12 +175,12 @@ func TestGetCurrentUserActivities(t *testing.T) {
 			name:   "successful retrieval",
 			userID: 1,
 			limit:  "5",
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				activities := []models.Activity{
 					{ID: 1, ActivityType: "smoke", UserID: 1, Value: 1},
 					{ID: 2, ActivityType: "workout", UserID: 1, Value: 30},
 				}
-				m.On("FindAllByUserID", uint(1), 5).Return(activities, nil)
+				m.On("GetCurrentUserActivities", uint(1), 5).Return(activities, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Activities retrieved successfully",
@@ -189,9 +189,9 @@ func TestGetCurrentUserActivities(t *testing.T) {
 			name:   "default limit when invalid",
 			userID: 1,
 			limit:  "invalid",
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				activities := []models.Activity{}
-				m.On("FindAllByUserID", uint(1), 10).Return(activities, nil)
+				m.On("GetCurrentUserActivities", uint(1), 10).Return(activities, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Activities retrieved successfully",
@@ -200,8 +200,8 @@ func TestGetCurrentUserActivities(t *testing.T) {
 			name:   "repository error",
 			userID: 1,
 			limit:  "5",
-			setupMock: func(m *mocks.MockActivityRepository) {
-				m.On("FindAllByUserID", uint(1), 5).Return([]models.Activity{}, errors.New("database error"))
+			setupMock: func(m *mocks.MockActivityService) {
+				m.On("GetCurrentUserActivities", uint(1), 5).Return([]models.Activity{}, errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedMsg:    "Failed to retrieve activities",
@@ -210,8 +210,8 @@ func TestGetCurrentUserActivities(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -234,7 +234,7 @@ func TestGetCurrentUserActivities(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedMsg, response["message"])
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -244,7 +244,7 @@ func TestGetActivityByID(t *testing.T) {
 		name           string
 		activityID     string
 		userID         uint
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -252,9 +252,9 @@ func TestGetActivityByID(t *testing.T) {
 			name:       "successful retrieval",
 			activityID: "1",
 			userID:     1,
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				activity := &models.Activity{ID: 1, ActivityType: "workout", UserID: 1, Value: 30}
-				m.On("FindByID", uint(1)).Return(activity, nil)
+				m.On("GetActivityByID", uint(1)).Return(activity, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Activity retrieved successfully",
@@ -263,7 +263,7 @@ func TestGetActivityByID(t *testing.T) {
 			name:           "invalid activity ID",
 			activityID:     "invalid",
 			userID:         1,
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid activity ID",
 		},
@@ -271,8 +271,8 @@ func TestGetActivityByID(t *testing.T) {
 			name:       "activity not found",
 			activityID: "999",
 			userID:     1,
-			setupMock: func(m *mocks.MockActivityRepository) {
-				m.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
+			setupMock: func(m *mocks.MockActivityService) {
+				m.On("GetActivityByID", uint(999)).Return(nil, errors.New("not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "Activity not found",
@@ -281,9 +281,9 @@ func TestGetActivityByID(t *testing.T) {
 			name:       "forbidden access",
 			activityID: "1",
 			userID:     2,
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				activity := &models.Activity{ID: 1, ActivityType: "workout", UserID: 1, Value: 30}
-				m.On("FindByID", uint(1)).Return(activity, nil)
+				m.On("GetActivityByID", uint(1)).Return(activity, nil)
 			},
 			expectedStatus: http.StatusForbidden,
 			expectedMsg:    "You can only access your own activities",
@@ -292,8 +292,8 @@ func TestGetActivityByID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -311,7 +311,7 @@ func TestGetActivityByID(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -322,7 +322,7 @@ func TestUpdateActivity(t *testing.T) {
 		activityID     string
 		userID         uint
 		requestBody    map[string]interface{}
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -334,10 +334,10 @@ func TestUpdateActivity(t *testing.T) {
 				"activity_type": "workout",
 				"value":         45,
 			},
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				existingActivity := &models.Activity{ID: 1, ActivityType: "workout", UserID: 1, Value: 30}
-				m.On("FindByID", uint(1)).Return(existingActivity, nil)
-				m.On("Update", mock.AnythingOfType("*models.Activity")).Return(nil)
+				m.On("GetActivityByID", uint(1)).Return(existingActivity, nil)
+				m.On("UpdateActivity", mock.AnythingOfType("*models.Activity")).Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Activity updated successfully",
@@ -347,7 +347,7 @@ func TestUpdateActivity(t *testing.T) {
 			activityID:     "invalid",
 			userID:         1,
 			requestBody:    map[string]interface{}{},
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid activity ID",
 		},
@@ -358,8 +358,8 @@ func TestUpdateActivity(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"activity_type": "workout",
 			},
-			setupMock: func(m *mocks.MockActivityRepository) {
-				m.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
+			setupMock: func(m *mocks.MockActivityService) {
+				m.On("GetActivityByID", uint(999)).Return(nil, errors.New("not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "Activity not found",
@@ -371,9 +371,9 @@ func TestUpdateActivity(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"activity_type": "workout",
 			},
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				existingActivity := &models.Activity{ID: 1, ActivityType: "workout", UserID: 1, Value: 30}
-				m.On("FindByID", uint(1)).Return(existingActivity, nil)
+				m.On("GetActivityByID", uint(1)).Return(existingActivity, nil)
 			},
 			expectedStatus: http.StatusForbidden,
 			expectedMsg:    "You can only update your own activities",
@@ -382,8 +382,8 @@ func TestUpdateActivity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -403,7 +403,7 @@ func TestUpdateActivity(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -413,7 +413,7 @@ func TestDeleteActivity(t *testing.T) {
 		name           string
 		activityID     string
 		userID         uint
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -421,10 +421,10 @@ func TestDeleteActivity(t *testing.T) {
 			name:       "successful deletion",
 			activityID: "1",
 			userID:     1,
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				existingActivity := &models.Activity{ID: 1, ActivityType: "workout", UserID: 1, Value: 30}
-				m.On("FindByID", uint(1)).Return(existingActivity, nil)
-				m.On("Delete", uint(1)).Return(nil)
+				m.On("GetActivityByID", uint(1)).Return(existingActivity, nil)
+				m.On("DeleteActivity", uint(1)).Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Activity deleted successfully",
@@ -433,7 +433,7 @@ func TestDeleteActivity(t *testing.T) {
 			name:           "invalid activity ID",
 			activityID:     "invalid",
 			userID:         1,
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid activity ID",
 		},
@@ -441,8 +441,8 @@ func TestDeleteActivity(t *testing.T) {
 			name:       "activity not found",
 			activityID: "999",
 			userID:     1,
-			setupMock: func(m *mocks.MockActivityRepository) {
-				m.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
+			setupMock: func(m *mocks.MockActivityService) {
+				m.On("GetActivityByID", uint(999)).Return(nil, errors.New("not found"))
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "Activity not found",
@@ -451,9 +451,9 @@ func TestDeleteActivity(t *testing.T) {
 			name:       "forbidden deletion",
 			activityID: "1",
 			userID:     2,
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				existingActivity := &models.Activity{ID: 1, ActivityType: "workout", UserID: 1, Value: 30}
-				m.On("FindByID", uint(1)).Return(existingActivity, nil)
+				m.On("GetActivityByID", uint(1)).Return(existingActivity, nil)
 			},
 			expectedStatus: http.StatusForbidden,
 			expectedMsg:    "You can only delete your own activities",
@@ -462,8 +462,8 @@ func TestDeleteActivity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -481,7 +481,7 @@ func TestDeleteActivity(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -492,7 +492,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 		userID         uint
 		startDate      string
 		endDate        string
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 	}{
@@ -501,7 +501,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 			userID:    1,
 			startDate: "2024-01-01",
 			endDate:   "2024-01-31",
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				activities := []models.Activity{
 					{ID: 1, ActivityType: "smoke", UserID: 1, Value: 1},
 					{ID: 2, ActivityType: "workout", UserID: 1, Value: 30},
@@ -509,7 +509,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 				startTime, _ := time.Parse("2006-01-02", "2024-01-01")
 				endTime, _ := time.Parse("2006-01-02", "2024-01-31")
 				endTime = endTime.Add(24 * time.Hour)
-				m.On("FindByUserIDAndActivityDateRange", uint(1), startTime, endTime).Return(activities, nil)
+				m.On("GetActivitiesByDateRange", uint(1), startTime, endTime).Return(activities, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedMsg:    "Activities retrieved successfully",
@@ -519,7 +519,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 			userID:         1,
 			startDate:      "invalid-date",
 			endDate:        "2024-01-31",
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid start date format",
 		},
@@ -528,7 +528,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 			userID:         1,
 			startDate:      "2024-01-01",
 			endDate:        "invalid-date",
-			setupMock:      func(m *mocks.MockActivityRepository) {},
+			setupMock:      func(m *mocks.MockActivityService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedMsg:    "Invalid end date format",
 		},
@@ -536,8 +536,8 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -556,7 +556,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }
@@ -565,7 +565,7 @@ func TestCountUserActivities(t *testing.T) {
 	tests := []struct {
 		name           string
 		userID         uint
-		setupMock      func(*mocks.MockActivityRepository)
+		setupMock      func(*mocks.MockActivityService)
 		expectedStatus int
 		expectedMsg    string
 		expectedCount  int64
@@ -573,7 +573,7 @@ func TestCountUserActivities(t *testing.T) {
 		{
 			name:   "successful count",
 			userID: 1,
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				m.On("CountUserActivities", uint(1)).Return(int64(5), nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -583,7 +583,7 @@ func TestCountUserActivities(t *testing.T) {
 		{
 			name:   "repository error",
 			userID: 1,
-			setupMock: func(m *mocks.MockActivityRepository) {
+			setupMock: func(m *mocks.MockActivityService) {
 				m.On("CountUserActivities", uint(1)).Return(int64(0), errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
@@ -593,8 +593,8 @@ func TestCountUserActivities(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller, mockRepo := setupControllerWithMock()
-			tt.setupMock(mockRepo)
+			controller, mockService := setupControllerWithMock()
+			tt.setupMock(mockService)
 
 			router := setupTestRouter()
 			router.Use(addAuthMiddleware(tt.userID))
@@ -618,7 +618,7 @@ func TestCountUserActivities(t *testing.T) {
 				assert.Equal(t, tt.expectedCount, count)
 			}
 
-			mockRepo.AssertExpectations(t)
+			mockService.AssertExpectations(t)
 		})
 	}
 }

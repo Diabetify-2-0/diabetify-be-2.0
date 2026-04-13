@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"diabetify/internal/models"
-	"diabetify/internal/repository"
+	"diabetify/internal/services"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,11 +11,11 @@ import (
 )
 
 type ActivityController struct {
-	repo repository.ActivityRepository
+	service services.ActivityService
 }
 
-func NewActivityController(repo repository.ActivityRepository) *ActivityController {
-	return &ActivityController{repo: repo}
+func NewActivityController(service services.ActivityService) *ActivityController {
+	return &ActivityController{service: service}
 }
 
 // CreateActivity godoc
@@ -63,7 +63,7 @@ func (ac *ActivityController) CreateActivity(c *gin.Context) {
 		return
 	}
 
-	if err := ac.repo.Create(&activity); err != nil {
+	if err := ac.service.CreateActivity(&activity); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to create activity",
@@ -107,7 +107,7 @@ func (ac *ActivityController) GetCurrentUserActivities(c *gin.Context) {
 		return
 	}
 
-	activities, err := ac.repo.FindAllByUserID(userID.(uint), limit)
+	activities, err := ac.service.GetCurrentUserActivities(userID.(uint), limit)
 	// separate activity by type ["smoke", "workout"]
 	groupedActivities := make(map[string]interface{})
 
@@ -161,7 +161,7 @@ func (ac *ActivityController) GetActivityByID(c *gin.Context) {
 		return
 	}
 
-	activity, err := ac.repo.FindByID(uint(id))
+	activity, err := ac.service.GetActivityByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -233,7 +233,7 @@ func (ac *ActivityController) UpdateActivity(c *gin.Context) {
 	}
 	activity.ID = uint(id)
 
-	existingActivity, err := ac.repo.FindByID(uint(id))
+	existingActivity, err := ac.service.GetActivityByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -263,7 +263,7 @@ func (ac *ActivityController) UpdateActivity(c *gin.Context) {
 
 	activity.UserID = existingActivity.UserID
 
-	if err := ac.repo.Update(&activity); err != nil {
+	if err := ac.service.UpdateActivity(&activity); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to update activity",
@@ -304,7 +304,7 @@ func (ac *ActivityController) DeleteActivity(c *gin.Context) {
 		return
 	}
 
-	existingActivity, err := ac.repo.FindByID(uint(id))
+	existingActivity, err := ac.service.GetActivityByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -331,7 +331,7 @@ func (ac *ActivityController) DeleteActivity(c *gin.Context) {
 		return
 	}
 
-	if err := ac.repo.Delete(uint(id)); err != nil {
+	if err := ac.service.DeleteActivity(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to delete activity",
@@ -397,7 +397,7 @@ func (ac *ActivityController) GetActivitiesByDateRange(c *gin.Context) {
 
 	endDate = endDate.Add(24 * time.Hour)
 
-	activities, err := ac.repo.FindByUserIDAndActivityDateRange(userID.(uint), startDate, endDate)
+	activities, err := ac.service.GetActivitiesByDateRange(userID.(uint), startDate, endDate)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -449,7 +449,7 @@ func (ac *ActivityController) CountUserActivities(c *gin.Context) {
 		return
 	}
 
-	count, err := ac.repo.CountUserActivities(userID.(uint))
+	count, err := ac.service.CountUserActivities(userID.(uint))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
