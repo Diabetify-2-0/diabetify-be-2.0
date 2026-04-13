@@ -3,7 +3,7 @@ package controllers
 import (
 	"bytes"
 	"diabetify/internal/models"
-	"diabetify/internal/repository"
+	"diabetify/internal/services"
 	"io"
 	"net/http"
 	"strconv"
@@ -13,11 +13,11 @@ import (
 )
 
 type ArticleController struct {
-	repo repository.ArticleRepository
+	service services.ArticleService
 }
 
-func NewArticleController(repo repository.ArticleRepository) *ArticleController {
-	return &ArticleController{repo: repo}
+func NewArticleController(service services.ArticleService) *ArticleController {
+	return &ArticleController{service: service}
 }
 
 // CreateArticle godoc
@@ -103,7 +103,7 @@ func (ac *ArticleController) CreateArticle(c *gin.Context) {
 		return
 	}
 
-	if err := ac.repo.Create(&article); err != nil {
+	if err := ac.service.CreateArticle(&article); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to create article",
@@ -166,7 +166,7 @@ func (ac *ArticleController) GetArticleByID(c *gin.Context) {
 		return
 	}
 
-	article, err := ac.repo.FindByID(uint(id))
+	article, err := ac.service.GetArticleByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -204,7 +204,7 @@ func (ac *ArticleController) GetArticleImage(c *gin.Context) {
 		return
 	}
 
-	imageData, mimeType, err := ac.repo.GetImage(uint(id))
+	imageData, mimeType, err := ac.service.GetArticleImage(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -244,7 +244,7 @@ func (ac *ArticleController) UpdateArticle(c *gin.Context) {
 		return
 	}
 
-	existingArticle, err := ac.repo.FindByID(uint(id))
+	existingArticle, err := ac.service.GetArticleByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -278,7 +278,7 @@ func (ac *ArticleController) UpdateArticle(c *gin.Context) {
 
 		deleteImage := c.PostForm("delete_image") == "true"
 		if deleteImage && existingArticle.HasImage {
-			if err := ac.repo.DeleteImage(uint(id)); err != nil {
+			if err := ac.service.DeleteArticleImage(uint(id)); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"status":  "error",
 					"message": "Failed to delete existing image",
@@ -303,7 +303,7 @@ func (ac *ArticleController) UpdateArticle(c *gin.Context) {
 		article.HasImage = existingArticle.HasImage
 	}
 
-	if err := ac.repo.Update(&article); err != nil {
+	if err := ac.service.UpdateArticle(&article); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to update article",
@@ -336,7 +336,7 @@ func (ac *ArticleController) UpdateArticle(c *gin.Context) {
 			return
 		}
 
-		if err := ac.repo.SaveImage(article.ID, buffer.Bytes(), mimeType); err != nil {
+		if err := ac.service.SaveArticleImage(article.ID, buffer.Bytes(), mimeType); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"status":  "error",
 				"message": "Article updated but failed to save image",
@@ -347,7 +347,7 @@ func (ac *ArticleController) UpdateArticle(c *gin.Context) {
 		}
 
 		article.HasImage = true
-		if err := ac.repo.Update(&article); err != nil {
+		if err := ac.service.UpdateArticle(&article); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"status":  "error",
 				"message": "Failed to update article image status",
@@ -386,7 +386,7 @@ func (ac *ArticleController) DeleteArticle(c *gin.Context) {
 		return
 	}
 
-	_, err = ac.repo.FindByID(uint(id))
+	_, err = ac.service.GetArticleByID(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -396,7 +396,7 @@ func (ac *ArticleController) DeleteArticle(c *gin.Context) {
 		return
 	}
 
-	if err := ac.repo.Delete(uint(id)); err != nil {
+	if err := ac.service.DeleteArticle(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to delete article",

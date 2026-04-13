@@ -60,6 +60,7 @@ func main() {
 		userRepo              repository.UserRepository
 		verificationRepo      repository.VerificationRepository
 		activityRepo          repository.ActivityRepository
+		articleRepo           repository.ArticleRepository
 		profileRepo           repository.UserProfileRepository
 		predictionRepo        repository.PredictionRepository
 		predictionJobRepo     repository.PredictionJobRepository
@@ -75,6 +76,7 @@ func main() {
 		userRepo = repository.NewUserRepository(nil)
 		verificationRepo = repository.NewVerificationRepository(nil)
 		activityRepo = repository.NewShardedActivityRepository()
+		articleRepo = repository.NewArticleRepository(database.DB)
 		profileRepo = repository.NewShardedUserProfileRepository()
 		predictionRepo = repository.NewShardedPredictionRepository()
 		log.Println("Initialized sharded repositories")
@@ -84,6 +86,7 @@ func main() {
 		userRepo = repository.NewUserRepository(database.DB)
 		verificationRepo = repository.NewVerificationRepository(database.DB)
 		activityRepo = repository.NewActivityRepository(database.DB)
+		articleRepo = repository.NewArticleRepository(database.DB)
 		profileRepo = repository.NewUserProfileRepository(database.DB)
 		predictionRepo = repository.NewPredictionRepository(database.DB)
 		log.Println("Initialized single database repositories")
@@ -158,12 +161,14 @@ func main() {
 	profileService := services.NewUserProfileService(profileRepo)
 	verificationService := services.NewVerificationService(verificationRepo, userRepo)
 	activityService := services.NewActivityService(activityRepo)
+	articleService := services.NewArticleService(articleRepo)
 
 	// Initialize controllers
 	userController := controllers.NewUserController(userService)
 	verificationController := controllers.NewVerificationController(verificationService)
 	oauthController := controllers.NewOauthController(userRepo)
 	activityController := controllers.NewActivityController(activityService)
+	articleController := controllers.NewArticleController(articleService)
 	profileController := controllers.NewUserProfileController(profileService)
 
 	// UNIFIED Prediction Controller (handles both sync and async via job worker)
@@ -210,6 +215,7 @@ func main() {
 	routes.RegisterSwaggerRoutes(router)
 	routes.RegisterOauthRoutes(router, oauthController)
 	routes.RegisterActivityRoutes(router, activityController)
+	routes.RegisterArticleRoutes(router, articleController)
 	routes.RegisterUserProfileRoutes(router, profileController)
 	routes.RegisterPredictionRoutes(router, predictionController)
 	routes.RegisterCounterfactualRoutes(router, counterfactualController)

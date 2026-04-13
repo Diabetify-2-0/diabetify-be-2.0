@@ -264,3 +264,57 @@ func (m *MockActivityService) CountUserActivities(userID uint) (int64, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int64), args.Error(1)
 }
+
+// MockArticleService is a mock implementation of the article service
+type MockArticleService struct {
+	mock.Mock
+}
+
+func (m *MockArticleService) CreateArticle(article *models.Article) error {
+	args := m.Called(article)
+	return args.Error(0)
+}
+
+func (m *MockArticleService) GetAllArticles() ([]models.Article, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.Article), args.Error(1)
+}
+
+func (m *MockArticleService) GetArticleByID(id uint) (*models.Article, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Article), args.Error(1)
+}
+
+func (m *MockArticleService) GetArticleImage(id uint) ([]byte, string, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.String(1), args.Error(2)
+	}
+	return args.Get(0).([]byte), args.String(1), args.Error(2)
+}
+
+func (m *MockArticleService) UpdateArticle(article *models.Article) error {
+	args := m.Called(article)
+	return args.Error(0)
+}
+
+func (m *MockArticleService) DeleteArticle(id uint) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *MockArticleService) DeleteArticleImage(id uint) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *MockArticleService) SaveArticleImage(id uint, imageData []byte, mimeType string) error {
+	args := m.Called(id, imageData, mimeType)
+	return args.Error(0)
+}
