@@ -223,6 +223,8 @@ func main() {
 	routes.RegisterUserProfileRoutes(router, profileController)
 	routes.RegisterPredictionRoutes(router, predictionController)
 	routes.RegisterCounterfactualRoutes(router, counterfactualController)
+	routes.RegisterDataRoutes(router)
+	routes.RegisterExpertRoutes(router)
 
 	// Debug endpoints
 	router.GET("/debug/stats", func(c *gin.Context) {

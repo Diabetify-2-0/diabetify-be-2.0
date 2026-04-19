@@ -62,6 +62,9 @@ func AuthMiddleware() gin.HandlerFunc {
 			// Set user details in context for use in handlers
 			c.Set("user_id", uint(claims["user_id"].(float64)))
 			c.Set("email", claims["email"].(string))
+			if role, ok := claims["role"].(string); ok {
+				c.Set("role", role)
+			}
 			c.Next()
 		} else {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -72,6 +75,27 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+	}
+}
+
+// RoleMiddleware restricts access to users with one of the specified roles.
+// Must be used after AuthMiddleware so that "role" is already set in context.
+func RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool, len(allowedRoles))
+	for _, r := range allowedRoles {
+		allowed[r] = true
+	}
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists || !allowed[role.(string)] {
+			c.JSON(http.StatusForbidden, gin.H{
+				"status":  "error",
+				"message": "Access forbidden: insufficient role",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 

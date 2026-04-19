@@ -77,6 +77,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       ML_SERVICE_ADDRESS: ${ML_SERVICE_ADDRESS:-localhost:50051}
+      MLOPS_SERVICE_URL: ${MLOPS_SERVICE_URL:-http://localhost:8000}
     ports:
       - "${PORT:-8080}:8080"
     volumes:

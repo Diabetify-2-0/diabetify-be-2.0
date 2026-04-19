@@ -312,6 +312,7 @@ func (uc *UserController) LoginUser(c *gin.Context) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": user.ID,
 		"email":   user.Email,
+		"role":    user.Role,
 		"exp":     time.Now().Add(time.Hour * 72).Unix(),
 	})
 	jwtSecret := []byte(os.Getenv("JWT_SECRET_KEY"))
