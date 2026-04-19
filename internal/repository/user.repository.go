@@ -13,6 +13,7 @@ type UserRepository interface {
 	CreateUser(user *models.User) error
 	GetUserByEmail(email string) (*models.User, error)
 	GetUserByID(id uint) (*models.User, error)
+	GetAllUsers() ([]*models.User, error)
 	PatchUser(id uint, data map[string]interface{}) error
 	UpdateUser(user *models.User) error
 	DeleteUser(id uint) error
@@ -203,4 +204,23 @@ func (ur *userRepository) UpdateLastPredictionTime(userID uint, lastPredictionTi
 	}
 
 	return ur.db.Model(&models.User{}).Where("id = ?", userID).Update("last_prediction_at", lastPredictionTime).Error
+}
+
+func (ur *userRepository) GetAllUsers() ([]*models.User, error) {
+	if ur.useShards {
+		var allUsers []*models.User
+		shards := database.Manager.GetAllShards()
+		for _, db := range shards {
+			var users []*models.User
+			if err := db.Where("role != ?", "USER").Order("created_at DESC").Find(&users).Error; err != nil {
+				return nil, err
+			}
+			allUsers = append(allUsers, users...)
+		}
+		return allUsers, nil
+	}
+
+	var users []*models.User
+	err := ur.db.Where("role != ?", "USER").Order("created_at DESC").Find(&users).Error
+	return users, err
 }

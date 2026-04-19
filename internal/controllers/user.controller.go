@@ -554,3 +554,185 @@ func (uc *UserController) GetCurrentUser(c *gin.Context) {
 		"data":    user,
 	})
 }
+
+func (uc *UserController) requireAdmin(c *gin.Context) bool {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status":  "error",
+			"message": "Unauthorized",
+			"error":   "User ID not found in token",
+		})
+		return false
+	}
+
+	user, err := uc.service.GetUserByID(userID.(uint))
+	if err != nil || user.Role != "ADMIN" {
+		c.JSON(http.StatusForbidden, gin.H{
+			"status":  "error",
+			"message": "Forbidden",
+			"error":   "Admin access required",
+		})
+		return false
+	}
+	return true
+}
+
+// ListAllUsers godoc
+// @Summary List all non-patient users (admin only)
+// @Description Returns all users with roles other than USER. Requires ADMIN role.
+// @Tags admin
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{} "Users retrieved successfully"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden"
+// @Failure 500 {object} map[string]interface{} "Failed to retrieve users"
+// @Router /admin/users [get]
+func (uc *UserController) ListAllUsers(c *gin.Context) {
+	if !uc.requireAdmin(c) {
+		return
+	}
+
+	users, err := uc.service.GetAllUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Failed to retrieve users",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	for _, u := range users {
+		u.Password = ""
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Users retrieved successfully",
+		"data":    users,
+	})
+}
+
+// AdminPatchUser godoc
+// @Summary Update any user by ID (admin only)
+// @Description Admin can update name, email, role, or verified status for any user.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "User ID"
+// @Param userData body map[string]interface{} true "Fields to update"
+// @Success 200 {object} map[string]interface{} "User updated successfully"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden"
+// @Failure 404 {object} map[string]interface{} "User not found"
+// @Failure 500 {object} map[string]interface{} "Failed to update user"
+// @Router /admin/users/{id} [patch]
+func (uc *UserController) AdminPatchUser(c *gin.Context) {
+	if !uc.requireAdmin(c) {
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Invalid user ID",
+			"error":   "ID must be a valid positive integer",
+		})
+		return
+	}
+
+	_, err = uc.service.GetUserByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"status":  "error",
+			"message": "User not found",
+			"error":   "No user exists with the provided ID",
+		})
+		return
+	}
+
+	var patchData map[string]interface{}
+	if err := c.ShouldBindJSON(&patchData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Invalid request data",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	if err := uc.service.PatchUser(uint(id), patchData); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Failed to update user",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	updatedUser, err := uc.service.GetUserByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "User updated but failed to retrieve updated data",
+			"error":   err.Error(),
+		})
+		return
+	}
+	updatedUser.Password = ""
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "User updated successfully",
+		"data":    updatedUser,
+	})
+}
+
+// AdminDeleteUser godoc
+// @Summary Delete any user by ID (admin only)
+// @Description Admin can delete any user account.
+// @Tags admin
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "User ID"
+// @Success 200 {object} map[string]interface{} "User deleted successfully"
+// @Failure 400 {object} map[string]interface{} "Invalid user ID"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden"
+// @Failure 500 {object} map[string]interface{} "Failed to delete user"
+// @Router /admin/users/{id} [delete]
+func (uc *UserController) AdminDeleteUser(c *gin.Context) {
+	if !uc.requireAdmin(c) {
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Invalid user ID",
+			"error":   "ID must be a valid positive integer",
+		})
+		return
+	}
+
+	if err := uc.service.DeleteUser(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Failed to delete user",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "User deleted successfully",
+		"data":    nil,
+	})
+}

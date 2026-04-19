@@ -19,6 +19,7 @@ type UserService interface {
 	CreateUser(email, password, name, role string, gender, dob *string) (*models.User, error)
 	GetUserByEmail(email string) (*models.User, error)
 	GetUserByID(id uint) (*models.User, error)
+	GetAllUsers() ([]*models.User, error)
 	VerifyPassword(hashedPassword, password string) bool
 	UpdateUser(user *models.User) error
 	DeleteUser(id uint) error
@@ -146,6 +147,10 @@ func (s *userService) GetUserByEmail(email string) (*models.User, error) {
 // GetUserByID retrieves a user by ID
 func (s *userService) GetUserByID(id uint) (*models.User, error) {
 	return s.userRepo.GetUserByID(id)
+}
+
+func (s *userService) GetAllUsers() ([]*models.User, error) {
+	return s.userRepo.GetAllUsers()
 }
 
 // UpdateUser updates a user
