@@ -79,7 +79,7 @@ func (s *userService) CreateUser(email, password, name, role string, gender, dob
 	}
 
 	// Validate role
-	validRoles := map[string]bool{"USER": true, "DATA_SCIENTIST": true, "MEDICAL_EXPERT": true}
+	validRoles := map[string]bool{"ADMIN": true, "USER": true, "DATA_SCIENTIST": true, "MEDICAL_EXPERT": true}
 	if !validRoles[role] {
 		return nil, fmt.Errorf("invalid role: %s", role)
 	}

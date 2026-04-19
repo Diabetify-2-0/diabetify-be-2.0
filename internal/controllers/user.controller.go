@@ -45,16 +45,16 @@ type RegisterUserRequest struct {
 	Name     string  `json:"name" binding:"required,min=2"`
 	Gender   *string `json:"gender"`
 	DOB      *string `json:"dob"`
-	Role     string  `json:"role" binding:"required,oneof=USER DATA_SCIENTIST MEDICAL_EXPERT"`
+	Role     string  `json:"role" binding:"omitempty,oneof=ADMIN USER DATA_SCIENTIST MEDICAL_EXPERT"` // Default: USER if not provided
 }
 
 // RegisterUser godoc
 // @Summary Register a new user
-// @Description Register a new user with role: USER, DATA_SCIENTIST, or MEDICAL_EXPERT
+// @Description Register a new user. Role is optional and defaults to USER. Valid roles: ADMIN, USER, DATA_SCIENTIST, MEDICAL_EXPERT
 // @Tags users
 // @Accept json
 // @Produce json
-// @Param request body RegisterUserRequest true "User registration data with role"
+// @Param request body RegisterUserRequest true "User registration data (role optional, defaults to USER)"
 // @Success 201 {object} map[string]interface{} "User registered successfully"
 // @Failure 400 {object} map[string]interface{} "Invalid request data or invalid role"
 // @Failure 500 {object} map[string]interface{} "Failed to create user"
@@ -71,6 +71,11 @@ func (uc *UserController) RegisterUser(c *gin.Context) {
 		return
 	}
 
+	// Set default role to USER if not provided
+	if req.Role == "" {
+		req.Role = "USER"
+	}
+
 	// Call service to create user (validation, password hashing, email duplicate check)
 	user, err := uc.service.CreateUser(req.Email, req.Password, req.Name, req.Role, req.Gender, req.DOB)
 	if err != nil {
@@ -84,6 +89,8 @@ func (uc *UserController) RegisterUser(c *gin.Context) {
 
 	var message string
 	switch req.Role {
+	case "ADMIN":
+		message = "Admin registered successfully."
 	case "DATA_SCIENTIST":
 		message = "Data Scientist registered successfully."
 	case "MEDICAL_EXPERT":
