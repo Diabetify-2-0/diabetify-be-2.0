@@ -37,6 +37,14 @@ func (m *MockUserService) GetUserByID(id uint) (*models.User, error) {
 	return args.Get(0).(*models.User), args.Error(1)
 }
 
+func (m *MockUserService) GetAllUsers() ([]*models.User, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.User), args.Error(1)
+}
+
 func (m *MockUserService) VerifyPassword(hashedPassword, password string) bool {
 	args := m.Called(hashedPassword, password)
 	return args.Bool(0)

@@ -133,6 +133,14 @@ func (m *MockUserRepository) GetUserByID(id uint) (*models.User, error) {
 	return args.Get(0).(*models.User), args.Error(1)
 }
 
+func (m *MockUserRepository) GetAllUsers() ([]*models.User, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.User), args.Error(1)
+}
+
 func (m *MockUserRepository) PatchUser(id uint, data map[string]interface{}) error {
 	args := m.Called(id, data)
 	return args.Error(0)
