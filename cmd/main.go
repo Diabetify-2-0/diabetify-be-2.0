@@ -5,6 +5,7 @@ import (
 	"diabetify/database"
 	"diabetify/docs"
 	"diabetify/internal/controllers"
+	"diabetify/internal/middleware"
 	"diabetify/internal/ml"
 	"diabetify/internal/repository"
 	"diabetify/internal/services"
@@ -190,6 +191,8 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	// Setup Gin router
 	router := gin.Default()
+
+	router.Use(middleware.CORSMiddleware())
 
 	router.GET("/", func(c *gin.Context) {
 		response := gin.H{

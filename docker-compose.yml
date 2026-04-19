@@ -12,7 +12,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-diabetify}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-diabetify}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -53,6 +57,7 @@ services:
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       PORT: ${PORT:-8080}
       USE_SHARDING: ${USE_SHARDING:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-password123}@rabbitmq:5672/
       ML_SERVICE_ADDRESS: ${ML_SERVICE_ADDRESS:-localhost:50051}
     ports:
