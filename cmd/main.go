@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,14 +22,7 @@ import (
 )
 
 func main() {
-	// Load environment variables
-	err := godotenv.Load(".env")
-	if err != nil {
-		err = godotenv.Load("../.env")
-	}
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
+	loadEnv()
 
 	// Check if sharding is enabled
 	useSharding := os.Getenv("USE_SHARDING") == "true"
@@ -93,25 +87,16 @@ func main() {
 		log.Println("Initialized single database repositories")
 	}
 
-	// Initialize ML Hybrid Client (both gRPC and RabbitMQ)
-	mlServiceAddress := os.Getenv("ML_SERVICE_ADDRESS")
-	if mlServiceAddress == "" {
-		mlServiceAddress = "localhost:50051"
-	}
+	rabbitMQURL := getEnv("RABBITMQ_URL", "amqp://admin:password123@localhost:5672/")
 
-	rabbitMQURL := os.Getenv("RABBITMQ_URL")
-	if rabbitMQURL == "" {
-		rabbitMQURL = "amqp://admin:password123@localhost:5672/"
-	}
-
-	log.Printf("Connecting to ML service via Hybrid Client (gRPC: %s, RabbitMQ: %s)...", mlServiceAddress, rabbitMQURL)
+	log.Printf("Connecting to ML service via RabbitMQ: %s", rabbitMQURL)
 
 	mlClient, err := ml.NewAsyncMLClient(
 		rabbitMQURL,
-		"ml.prediction.hybrid_response",
+		"ml.prediction.response",
 	)
 	if err != nil {
-		log.Fatal("Failed to create ML Hybrid client:", err)
+		log.Fatal("Failed to create ML RabbitMQ client:", err)
 	}
 	defer mlClient.Close()
 
@@ -140,6 +125,7 @@ func main() {
 		activityRepo,
 		mlClient,
 		workerCount,
+		rabbitMQURL,
 	)
 
 	log.Printf("Starting prediction job worker with %d workers...", workerCount)
@@ -199,7 +185,7 @@ func main() {
 			"message":        "Diabetify API is running",
 			"version":        "1.0.0",
 			"status":         "healthy",
-			"ml_service":     "Hybrid (gRPC + RabbitMQ)",
+			"ml_service":     "RabbitMQ async worker",
 			"prediction":     "Async prediction jobs via RabbitMQ",
 			"counterfactual": "Async counterfactual jobs via RabbitMQ",
 		}
@@ -231,31 +217,17 @@ func main() {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 
-		// Get job worker status if available
-		workerStatus := map[string]interface{}{
-			"available": false,
-		}
-
-		// Try to get worker status (implement a simple status check)
-		// Since GetStatus() might not be available, we'll do a basic check
-		workerStatus["available"] = predictionJobWorker != nil
-
 		c.JSON(200, gin.H{
 			"goroutines": runtime.NumGoroutine(),
 			"memory_mb":  m.Alloc / 1024 / 1024,
 			"workers":    workerCount,
-			"job_worker": workerStatus,
+			"job_worker": predictionJobWorker.GetStatus(),
 		})
 	})
 
 	// Job worker specific debug endpoint
 	router.GET("/debug/jobs", func(c *gin.Context) {
-		// Simple job status without relying on GetStatus()
-		c.JSON(200, gin.H{
-			"job_worker_running": predictionJobWorker != nil,
-			"worker_count":       workerCount,
-			"message":            "Job worker is active and processing async predictions",
-		})
+		c.JSON(200, predictionJobWorker.GetStatus())
 	})
 
 	router.GET("/debug/counterfactual", func(c *gin.Context) {
@@ -333,4 +305,22 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
+}
+
+func loadEnv() {
+	if err := godotenv.Load(".env"); err == nil {
+		return
+	}
+	if err := godotenv.Load("../.env"); err == nil {
+		return
+	}
+	log.Println("No .env file found; using process environment")
+}
+
+func getEnv(key, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }

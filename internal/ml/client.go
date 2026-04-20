@@ -11,18 +11,15 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// Enhanced MLClient interface for RabbitMQ-only operations
+// MLClient publishes prediction and health-check requests to RabbitMQ.
 type MLClient interface {
-	// Asynchronous operations (RabbitMQ)
 	PredictAsync(ctx context.Context, jobID string, features []float64) error
 	HealthCheckAsync(ctx context.Context) error
-	// Common
 	Close() error
 }
 
-// fireAndForgetMLClient implements pure fire-and-forget communication
+// fireAndForgetMLClient implements fire-and-forget RabbitMQ communication.
 type fireAndForgetMLClient struct {
-	// RabbitMQ components (publishing only)
 	rabbitConn    *amqp.Connection
 	rabbitChannel *amqp.Channel
 	requestQueue  string
@@ -39,10 +36,10 @@ type fireAndForgetMLClient struct {
 	messagesSent int64
 }
 
-// NewFireAndForgetMLClient creates a client that supports fire-and-forget communication
+// NewAsyncMLClient creates a RabbitMQ client for asynchronous ML requests.
 func NewAsyncMLClient(rabbitURL, responseQueue string) (MLClient, error) {
 	if responseQueue == "" {
-		responseQueue = "ml.prediction.hybrid_response"
+		responseQueue = "ml.prediction.response"
 	}
 
 	client := &fireAndForgetMLClient{
@@ -108,9 +105,7 @@ func (c *fireAndForgetMLClient) initRabbitMQ() error {
 	return nil
 }
 
-// ============ FIRE-AND-FORGET OPERATIONS ============
-
-// SubmitPredictionFireAndForget sends a prediction request and immediately returns
+// PredictAsync sends a prediction request and immediately returns.
 func (c *fireAndForgetMLClient) PredictAsync(ctx context.Context, jobID string, features []float64) error {
 	if c.closed || c.rabbitChannel == nil {
 		return errors.New("RabbitMQ client not available")
@@ -133,7 +128,6 @@ func (c *fireAndForgetMLClient) PredictAsync(ctx context.Context, jobID string, 
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Fire-and-forget: publish message and return immediately
 	err = c.rabbitChannel.Publish(
 		"",
 		c.requestQueue,
@@ -156,7 +150,7 @@ func (c *fireAndForgetMLClient) PredictAsync(ctx context.Context, jobID string, 
 	return nil
 }
 
-// HealthCheckFireAndForget sends a health check message and returns immediately
+// HealthCheckAsync sends a health-check request and immediately returns.
 func (c *fireAndForgetMLClient) HealthCheckAsync(ctx context.Context) error {
 	if c.closed || c.rabbitChannel == nil {
 		return errors.New("RabbitMQ client not available")
@@ -175,7 +169,6 @@ func (c *fireAndForgetMLClient) HealthCheckAsync(ctx context.Context) error {
 		return fmt.Errorf("failed to marshal health check request: %w", err)
 	}
 
-	// Fire-and-forget: publish message and return immediately
 	err = c.rabbitChannel.Publish(
 		"",
 		c.healthQueue,

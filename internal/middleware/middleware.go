@@ -57,16 +57,8 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Extract claims
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Set user details in context for use in handlers
-			c.Set("user_id", uint(claims["user_id"].(float64)))
-			c.Set("email", claims["email"].(string))
-			if role, ok := claims["role"].(string); ok {
-				c.Set("role", role)
-			}
-			c.Next()
-		} else {
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"status":  "error",
 				"message": "Invalid token claims",
@@ -75,6 +67,35 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		userID, ok := claims["user_id"].(float64)
+		if !ok || userID <= 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"status":  "error",
+				"message": "Invalid token claims",
+				"error":   "Missing or invalid user_id claim",
+			})
+			c.Abort()
+			return
+		}
+
+		email, ok := claims["email"].(string)
+		if !ok || email == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"status":  "error",
+				"message": "Invalid token claims",
+				"error":   "Missing or invalid email claim",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Set("user_id", uint(userID))
+		c.Set("email", email)
+		if role, ok := claims["role"].(string); ok {
+			c.Set("role", role)
+		}
+		c.Next()
 	}
 }
 
@@ -87,7 +108,8 @@ func RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		role, exists := c.Get("role")
-		if !exists || !allowed[role.(string)] {
+		roleName, ok := role.(string)
+		if !exists || !ok || !allowed[roleName] {
 			c.JSON(http.StatusForbidden, gin.H{
 				"status":  "error",
 				"message": "Access forbidden: insufficient role",

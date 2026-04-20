@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -16,14 +17,9 @@ type RedisClient struct {
 }
 
 func NewRedisClient() (*RedisClient, error) {
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "redis://:redis123@localhost:6379/0"
-	}
-
-	opt, err := redis.ParseURL(redisURL)
+	opt, err := redisOptionsFromEnv()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
+		return nil, err
 	}
 
 	client := redis.NewClient(opt)
@@ -38,6 +34,40 @@ func NewRedisClient() (*RedisClient, error) {
 	return &RedisClient{
 		client: client,
 		ctx:    ctx,
+	}, nil
+}
+
+func redisOptionsFromEnv() (*redis.Options, error) {
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse REDIS_URL: %w", err)
+		}
+		return opt, nil
+	}
+
+	host := os.Getenv("REDIS_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	port := os.Getenv("REDIS_PORT")
+	if port == "" {
+		port = "6379"
+	}
+
+	db := 0
+	if rawDB := os.Getenv("REDIS_DB"); rawDB != "" {
+		parsedDB, err := strconv.Atoi(rawDB)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDIS_DB %q: %w", rawDB, err)
+		}
+		db = parsedDB
+	}
+
+	return &redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", host, port),
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       db,
 	}, nil
 }
 

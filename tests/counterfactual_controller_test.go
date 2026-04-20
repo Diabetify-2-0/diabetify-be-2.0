@@ -89,7 +89,7 @@ func TestCounterfactualHealth(t *testing.T) {
 
 func TestCounterfactualGetJobStatusFieldMapping(t *testing.T) {
 	reasonCode := "OK"
-	infoMessage := "Stub feasible counterfactual generated for integration testing."
+	infoMessage := "Actionable counterfactual generated for controller testing."
 
 	tests := []struct {
 		name             string

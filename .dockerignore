@@ -1,0 +1,11 @@
+.git
+.gocache
+.env
+.env.local
+.env.*.local
+.DS_Store
+
+bin
+tmp
+coverage.out
+*.test

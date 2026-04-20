@@ -199,7 +199,10 @@ func (s *userService) PatchUser(id uint, data map[string]interface{}) error {
 
 	// If password is being updated in patch, validate and hash it
 	if password, exists := data["password"]; exists {
-		passwordStr := password.(string)
+		passwordStr, ok := password.(string)
+		if !ok {
+			return errors.New("password must be a string")
+		}
 		if len(passwordStr) < 8 {
 			return errors.New("password must be at least 8 characters")
 		}

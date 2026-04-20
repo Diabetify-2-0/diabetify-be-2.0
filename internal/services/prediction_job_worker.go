@@ -59,6 +59,7 @@ type predictionJobWorker struct {
 	maxJobTimeout   time.Duration
 	cleanupInterval time.Duration
 	redisClient     *cache.RedisClient
+	rabbitURL       string
 }
 
 // NewPredictionJobWorker creates a new prediction job worker
@@ -70,9 +71,13 @@ func NewPredictionJobWorker(
 	activityRepo repository.ActivityRepository,
 	mlClient ml.MLClient,
 	workerCount int,
+	rabbitURL string,
 ) PredictionJobWorker {
 	if workerCount <= 0 {
 		workerCount = 3
+	}
+	if rabbitURL == "" {
+		rabbitURL = "amqp://admin:password123@localhost:5672/"
 	}
 	redisClient, err := cache.NewRedisClient()
 	if err != nil {
@@ -93,6 +98,7 @@ func NewPredictionJobWorker(
 		maxJobTimeout:   30 * time.Second,
 		cleanupInterval: 30 * time.Minute,
 		redisClient:     redisClient,
+		rabbitURL:       rabbitURL,
 	}
 }
 
@@ -117,8 +123,13 @@ func (w *predictionJobWorker) Start() {
 	w.running = true
 	w.mu.Unlock()
 
-	// Setup RabbitMQ response handler (separate from job processing)
-	_ = w.setupRabbitMQResponseHandler()
+	if err := w.setupRabbitMQResponseHandler(); err != nil {
+		w.mu.Lock()
+		w.running = false
+		w.mu.Unlock()
+		fmt.Printf("ERROR: Failed to setup RabbitMQ response handler: %v\n", err)
+		return
+	}
 
 	// Start worker goroutines for job processing
 	for i := 0; i < w.workerCount; i++ {
@@ -203,7 +214,7 @@ func (w *predictionJobWorker) GetWhatIfResult(jobID string) (map[string]interfac
 
 func (w *predictionJobWorker) setupRabbitMQResponseHandler() error {
 	var err error
-	w.conn, err = amqp.Dial("amqp://admin:password123@localhost:5672/")
+	w.conn, err = amqp.Dial(w.rabbitURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %v", err)
 	}
@@ -214,14 +225,14 @@ func (w *predictionJobWorker) setupRabbitMQResponseHandler() error {
 	}
 
 	_, err = w.responseChannel.QueueDeclare(
-		"ml.prediction.hybrid_response", true, false, false, false, nil,
+		"ml.prediction.response", true, false, false, false, nil,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to declare queue: %v", err)
 	}
 
 	msgs, err := w.responseChannel.Consume(
-		"ml.prediction.hybrid_response", "response_handler", false, false, false, false, nil,
+		"ml.prediction.response", "response_handler", false, false, false, false, nil,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to register consumer: %v", err)
