@@ -209,7 +209,7 @@ func main() {
 	routes.RegisterUserProfileRoutes(router, profileController)
 	routes.RegisterPredictionRoutes(router, predictionController)
 	routes.RegisterCounterfactualRoutes(router, counterfactualController)
-	routes.RegisterDataRoutes(router)
+	routes.RegisterDataRoutes(router, userRepo)
 	routes.RegisterExpertRoutes(router)
 
 	// Debug endpoints

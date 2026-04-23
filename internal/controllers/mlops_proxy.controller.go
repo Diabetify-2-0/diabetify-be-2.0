@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"diabetify/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,7 +29,7 @@ func getMLOpsBaseURL() string {
 
 // MLOpsProxy returns a Gin handler that proxies the current request to the MLOps service.
 // targetPath supports Gin-style params (e.g. /datasets/:id) that are resolved from c.Params.
-func MLOpsProxy(targetPath string) gin.HandlerFunc {
+func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetUint("user_id")
 
@@ -56,12 +59,10 @@ func MLOpsProxy(targetPath string) gin.HandlerFunc {
 			return
 		}
 
-		// Preserve Content-Type (critical for multipart/form-data boundary)
 		if ct := c.GetHeader("Content-Type"); ct != "" {
 			req.Header.Set("Content-Type", ct)
 		}
 
-		// Inject authenticated user ID so MLOps can record uploaded_by / triggered_by
 		req.Header.Set("X-User-ID", strconv.FormatUint(uint64(userID), 10))
 
 		resp, err := mlopsHTTPClient.Do(req)
@@ -74,14 +75,54 @@ func MLOpsProxy(targetPath string) gin.HandlerFunc {
 		}
 		defer resp.Body.Close()
 
-		// Forward response headers
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  "error",
+				"message": "Failed to read MLOps response",
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		if c.Request.Method == "GET" && strings.HasSuffix(path, "/datasets") && resp.StatusCode == http.StatusOK {
+			var response map[string]interface{}
+			if err := json.Unmarshal(body, &response); err == nil {
+				if data, ok := response["data"].([]interface{}); ok {
+					for _, item := range data {
+						if dataset, ok := item.(map[string]interface{}); ok {
+							if uploadedByVal, ok := dataset["uploaded_by"]; ok {
+								uploadedByInt, _ := uploadedByVal.(float64)
+								uploaderID := uint(uploadedByInt)
+
+								user, err := userRepo.GetUserByID(uploaderID)
+								if err == nil && user != nil {
+									dataset["uploader_name"] = user.Name
+								} else {
+									dataset["uploader_name"] = fmt.Sprintf("User #%d", uploaderID)
+								}
+							}
+						}
+					}
+
+					enrichedBody, err := json.Marshal(response)
+					if err == nil {
+						body = enrichedBody
+					}
+				}
+			}
+		}
+
 		for key, values := range resp.Header {
+			if key == "Content-Length" || key == "Content-Encoding" || key == "Transfer-Encoding" {
+				continue
+			}
 			for _, v := range values {
 				c.Header(key, v)
 			}
 		}
 
 		c.Status(resp.StatusCode)
-		io.Copy(c.Writer, resp.Body) //nolint:errcheck
+		c.Data(resp.StatusCode, "application/json", body)
 	}
 }
