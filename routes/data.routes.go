@@ -19,6 +19,7 @@ func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository) 
 		data.POST("/datasets", controllers.MLOpsProxy("/datasets", userRepo))
 		data.GET("/datasets", controllers.MLOpsProxy("/datasets", userRepo))
 		data.GET("/datasets/:id", controllers.MLOpsProxy("/datasets/:id", userRepo))
+		data.GET("/datasets/:id/download", controllers.MLOpsProxy("/datasets/:id/download", userRepo))
 		data.POST("/datasets/:id/preprocess", controllers.MLOpsProxy("/datasets/:id/preprocess", userRepo))
 
 		// Training jobs

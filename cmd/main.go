@@ -210,7 +210,7 @@ func main() {
 	routes.RegisterPredictionRoutes(router, predictionController)
 	routes.RegisterCounterfactualRoutes(router, counterfactualController)
 	routes.RegisterDataRoutes(router, userRepo)
-	routes.RegisterExpertRoutes(router)
+	routes.RegisterExpertRoutes(router, userRepo)
 
 	// Debug endpoints
 	router.GET("/debug/stats", func(c *gin.Context) {

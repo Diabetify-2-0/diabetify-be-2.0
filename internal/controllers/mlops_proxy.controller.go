@@ -75,6 +75,21 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 		}
 		defer resp.Body.Close()
 
+		// Only buffer for the dataset list endpoint where we need to enrich user names.
+		// All other responses (including file downloads) are streamed directly.
+		needsEnrichment := c.Request.Method == "GET" && strings.HasSuffix(path, "/datasets") && resp.StatusCode == http.StatusOK
+
+		if !needsEnrichment {
+			for key, values := range resp.Header {
+				for _, v := range values {
+					c.Header(key, v)
+				}
+			}
+			c.Status(resp.StatusCode)
+			io.Copy(c.Writer, resp.Body) //nolint:errcheck
+			return
+		}
+
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -85,30 +100,28 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 			return
 		}
 
-		if c.Request.Method == "GET" && strings.HasSuffix(path, "/datasets") && resp.StatusCode == http.StatusOK {
-			var response map[string]interface{}
-			if err := json.Unmarshal(body, &response); err == nil {
-				if data, ok := response["data"].([]interface{}); ok {
-					for _, item := range data {
-						if dataset, ok := item.(map[string]interface{}); ok {
-							if uploadedByVal, ok := dataset["uploaded_by"]; ok {
-								uploadedByInt, _ := uploadedByVal.(float64)
-								uploaderID := uint(uploadedByInt)
+		var response map[string]interface{}
+		if err := json.Unmarshal(body, &response); err == nil {
+			if data, ok := response["data"].([]interface{}); ok {
+				for _, item := range data {
+					if dataset, ok := item.(map[string]interface{}); ok {
+						if uploadedByVal, ok := dataset["uploaded_by"]; ok {
+							uploadedByInt, _ := uploadedByVal.(float64)
+							uploaderID := uint(uploadedByInt)
 
-								user, err := userRepo.GetUserByID(uploaderID)
-								if err == nil && user != nil {
-									dataset["uploader_name"] = user.Name
-								} else {
-									dataset["uploader_name"] = fmt.Sprintf("User #%d", uploaderID)
-								}
+							user, err := userRepo.GetUserByID(uploaderID)
+							if err == nil && user != nil {
+								dataset["uploader_name"] = user.Name
+							} else {
+								dataset["uploader_name"] = fmt.Sprintf("User #%d", uploaderID)
 							}
 						}
 					}
+				}
 
-					enrichedBody, err := json.Marshal(response)
-					if err == nil {
-						body = enrichedBody
-					}
+				enrichedBody, err := json.Marshal(response)
+				if err == nil {
+					body = enrichedBody
 				}
 			}
 		}
@@ -122,7 +135,6 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 			}
 		}
 
-		c.Status(resp.StatusCode)
 		c.Data(resp.StatusCode, "application/json", body)
 	}
 }
