@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"diabetify/internal/cache"
 	"diabetify/internal/ml"
@@ -9,6 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +64,8 @@ type predictionJobWorker struct {
 	cleanupInterval time.Duration
 	redisClient     *cache.RedisClient
 	rabbitURL       string
+	mlopsURL        string
+	shadowClient    *http.Client
 }
 
 // NewPredictionJobWorker creates a new prediction job worker
@@ -85,6 +91,12 @@ func NewPredictionJobWorker(
 		fmt.Printf("Warning: Failed to connect to Redis: %v\n", err)
 	}
 
+	mlopsURL := os.Getenv("MLOPS_SERVICE_URL")
+	if mlopsURL == "" {
+		mlopsURL = "http://localhost:8000"
+	}
+	mlopsURL = strings.TrimRight(mlopsURL, "/")
+
 	return &predictionJobWorker{
 		jobRepo:         jobRepo,
 		predRepo:        predRepo,
@@ -99,6 +111,8 @@ func NewPredictionJobWorker(
 		cleanupInterval: 30 * time.Minute,
 		redisClient:     redisClient,
 		rabbitURL:       rabbitURL,
+		mlopsURL:        mlopsURL,
+		shadowClient:    &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -143,6 +157,12 @@ func (w *predictionJobWorker) Start() {
 	// Start cleanup routine
 	w.wg.Add(1)
 	go w.cleanupRoutine()
+
+	// Start challenger polling (shadow deployment)
+	if w.redisClient != nil {
+		w.wg.Add(1)
+		go w.pollChallengerInfo()
+	}
 }
 
 func (w *predictionJobWorker) Stop() {
@@ -328,6 +348,9 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 	_ = w.userRepo.UpdateLastPredictionTime(job.UserID, &now)
 
 	_ = w.jobRepo.UpdateJobStatusWithResult(jobID, "completed", prediction.ID)
+
+	// Update shadow prediction with champion result (fire-and-forget)
+	go w.updateShadowChampionResult(jobID, rabbitResponse.Prediction)
 }
 
 func (w *predictionJobWorker) worker(workerID int) {
@@ -382,6 +405,11 @@ func (w *predictionJobWorker) processJobFireAndForget(jobRequest models.Predicti
 	}
 
 	_ = w.jobRepo.UpdateJobStatus(jobID, models.JobStatusSubmitted, nil)
+
+	// Shadow prediction: kirim ke challenger jika aktif (hanya untuk prediksi reguler, bukan what-if)
+	if jobRequest.WhatIfInput == nil {
+		go w.sendShadowPrediction(jobID, features)
+	}
 }
 
 func (w *predictionJobWorker) recoverPendingJobs() {
@@ -965,4 +993,118 @@ func (w *predictionJobWorker) boolToFloat(b bool) float64 {
 		return 1.0
 	}
 	return 0.0
+}
+
+// pollChallengerInfo polls MLOps every 30s for active challenger info and caches it in Redis.
+func (w *predictionJobWorker) pollChallengerInfo() {
+	defer w.wg.Done()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Poll immediately on start
+	w.fetchAndCacheChallenger()
+
+	for {
+		select {
+		case <-ticker.C:
+			w.fetchAndCacheChallenger()
+		case <-w.stopChan:
+			return
+		}
+	}
+}
+
+func (w *predictionJobWorker) fetchAndCacheChallenger() {
+	resp, err := w.shadowClient.Get(fmt.Sprintf("%s/shadow/active", w.mlopsURL))
+	if err != nil {
+		fmt.Printf("Warning: failed to poll challenger info: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var info cache.ChallengerInfo
+		if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+			fmt.Printf("Warning: failed to decode challenger info: %v\n", err)
+			return
+		}
+		_ = w.redisClient.SetActiveChallengerInfo(&info)
+	} else {
+		// 404 = no active challenger; clear stale cache
+		_ = w.redisClient.DeleteActiveChallengerInfo()
+	}
+}
+
+// featureColumnNames must match the order of features slice from calculateFeaturesFromProfile.
+var featureColumnNames = []string{
+	"age", "smoking_status", "is_cholesterol", "is_macrosomic_baby",
+	"physical_activity_frequency", "is_bloodline", "brinkman_index", "bmi", "is_hypertension",
+}
+
+// updateShadowChampionResult PATCHes the shadow prediction record in MLOps with the champion result.
+func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
+	riskLabel := "low"
+	if riskScore >= 0.5 {
+		riskLabel = "high"
+	}
+	body, err := json.Marshal(map[string]interface{}{
+		"champion_result": map[string]interface{}{
+			"risk_score": riskScore,
+			"risk_label": riskLabel,
+		},
+	})
+	if err != nil {
+		return
+	}
+	url := fmt.Sprintf("%s/shadow/predict/%s/result", w.mlopsURL, jobID)
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := w.shadowClient.Do(req)
+	if err != nil {
+		fmt.Printf("Warning: failed to update shadow champion result for job %s: %v\n", jobID, err)
+		return
+	}
+	resp.Body.Close()
+}
+
+// sendShadowPrediction fires an async POST to MLOps challenger endpoint (fire-and-forget).
+func (w *predictionJobWorker) sendShadowPrediction(jobID string, features []float64) {
+	if w.redisClient == nil {
+		return
+	}
+	info, err := w.redisClient.GetActiveChallengerInfo()
+	if err != nil || info == nil {
+		return
+	}
+
+	featureMap := make(map[string]float64, len(featureColumnNames))
+	for i, name := range featureColumnNames {
+		if i < len(features) {
+			featureMap[name] = features[i]
+		}
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"champion_job_id": jobID,
+		"features":        featureMap,
+	})
+	if err != nil {
+		return
+	}
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/shadow/predict", w.mlopsURL), bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.shadowClient.Do(req)
+	if err != nil {
+		fmt.Printf("Warning: shadow prediction request failed: %v\n", err)
+		return
+	}
+	resp.Body.Close()
 }

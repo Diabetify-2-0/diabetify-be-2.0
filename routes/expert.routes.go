@@ -19,8 +19,16 @@ func RegisterExpertRoutes(router *gin.Engine, userRepo repository.UserRepository
 		expert.GET("/models", controllers.MLOpsProxy("/models", userRepo))
 		expert.GET("/models/:id", controllers.MLOpsProxy("/models/:id", userRepo))
 
-		// Approval workflow
-		expert.GET("/approvals", controllers.MLOpsProxy("/approvals", userRepo))
-		expert.POST("/approvals/:id/review", controllers.MLOpsProxy("/approvals/:id/review", userRepo))
+		// Model review — approve or reject challenger
+		expert.POST("/models/:id/approve", controllers.MLOpsProxy("/models/:id/approve", userRepo))
+		expert.POST("/models/:id/reject", controllers.MLOpsProxy("/models/:id/reject", userRepo))
+
+		// Shadow deployment comparison (read-only)
+		expert.GET("/shadow/active", controllers.MLOpsProxy("/shadow/active", userRepo))
+		expert.GET("/shadow/:deployment_id/stats", controllers.MLOpsProxy("/shadow/:deployment_id/stats", userRepo))
+		expert.GET("/shadow/:deployment_id/predictions", controllers.MLOpsProxy("/shadow/:deployment_id/predictions", userRepo))
+
+		// Expert prediction (champion + challenger side-by-side)
+		expert.POST("/predict", controllers.MLOpsProxy("/expert/predict", userRepo))
 	}
 }

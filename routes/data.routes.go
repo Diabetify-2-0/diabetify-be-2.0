@@ -32,7 +32,9 @@ func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository) 
 		data.GET("/models", controllers.MLOpsProxy("/models", userRepo))
 		data.GET("/models/:id", controllers.MLOpsProxy("/models/:id", userRepo))
 
-		// Request approval for a model (body must include model_id)
-		data.POST("/approvals", controllers.MLOpsProxy("/approvals", userRepo))
+		// Shadow deployment
+		data.POST("/shadow/activate", controllers.MLOpsProxy("/shadow/activate", userRepo))
+		data.POST("/shadow/deactivate/:deployment_id", controllers.MLOpsProxy("/shadow/deactivate/:deployment_id", userRepo))
+		data.GET("/shadow/active", controllers.MLOpsProxy("/shadow/active", userRepo))
 	}
 }
