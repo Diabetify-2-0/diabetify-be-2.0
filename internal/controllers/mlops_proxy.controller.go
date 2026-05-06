@@ -75,9 +75,10 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 		}
 		defer resp.Body.Close()
 
-		// Only buffer for the dataset list endpoint where we need to enrich user names.
+		// Only buffer for endpoints where we need to enrich user names.
 		// All other responses (including file downloads) are streamed directly.
-		needsEnrichment := c.Request.Method == "GET" && strings.HasSuffix(path, "/datasets") && resp.StatusCode == http.StatusOK
+		needsEnrichment := c.Request.Method == "GET" && resp.StatusCode == http.StatusOK &&
+			(strings.HasSuffix(path, "/datasets") || strings.HasSuffix(path, "/training/jobs") || strings.HasSuffix(path, "/models"))
 
 		if !needsEnrichment {
 			for key, values := range resp.Header {
@@ -114,6 +115,28 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 								dataset["uploader_name"] = user.Name
 							} else {
 								dataset["uploader_name"] = fmt.Sprintf("User #%d", uploaderID)
+							}
+						}
+						if triggeredByVal, ok := dataset["triggered_by"]; ok {
+							triggeredByInt, _ := triggeredByVal.(float64)
+							triggeredID := uint(triggeredByInt)
+
+							user, err := userRepo.GetUserByID(triggeredID)
+							if err == nil && user != nil {
+								dataset["triggered_by_name"] = user.Name
+							} else {
+								dataset["triggered_by_name"] = fmt.Sprintf("User #%d", triggeredID)
+							}
+						}
+						if trainedByVal, ok := dataset["trained_by"]; ok {
+							trainedByInt, _ := trainedByVal.(float64)
+							trainedID := uint(trainedByInt)
+
+							user, err := userRepo.GetUserByID(trainedID)
+							if err == nil && user != nil {
+								dataset["trained_by_name"] = user.Name
+							} else {
+								dataset["trained_by_name"] = fmt.Sprintf("User #%d", trainedID)
 							}
 						}
 					}

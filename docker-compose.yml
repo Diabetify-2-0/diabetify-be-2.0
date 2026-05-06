@@ -88,7 +88,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
-      MLOPS_SERVICE_URL: ${MLOPS_SERVICE_URL:-http://localhost:8000}
+      MLOPS_SERVICE_URL: ${MLOPS_SERVICE_URL:-http://host.docker.internal:8000}
     ports:
       - "${PORT:-8080}:8080"
     depends_on:

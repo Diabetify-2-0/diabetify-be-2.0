@@ -22,8 +22,5 @@ func RegisterExpertRoutes(router *gin.Engine, userRepo repository.UserRepository
 		// Approval workflow
 		expert.GET("/approvals", controllers.MLOpsProxy("/approvals", userRepo))
 		expert.POST("/approvals/:id/review", controllers.MLOpsProxy("/approvals/:id/review", userRepo))
-
-		// Promote an approved model to live
-		expert.POST("/models/:id/promote", controllers.MLOpsProxy("/models/:id/promote", userRepo))
 	}
 }
