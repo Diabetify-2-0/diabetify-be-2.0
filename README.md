@@ -36,7 +36,7 @@ This exposes:
 
 - Backend API: `http://localhost:8080`
 - RabbitMQ: `amqp://admin:password123@localhost:5672/`
-- RabbitMQ UI: `http://localhost:15672`
+- RabbitMQ UI: `http://localhost:25672`
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
