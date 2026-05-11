@@ -24,6 +24,10 @@ import (
 func main() {
 	loadEnv()
 
+	if os.Getenv("JWT_SECRET_KEY") == "" {
+		log.Fatal("JWT_SECRET_KEY environment variable is not set")
+	}
+
 	// Check if sharding is enabled
 	useSharding := os.Getenv("USE_SHARDING") == "true"
 	log.Printf("Sharding mode: %v", useSharding)
@@ -213,7 +217,8 @@ func main() {
 	routes.RegisterExpertRoutes(router, userRepo)
 
 	// Debug endpoints
-	router.GET("/debug/stats", func(c *gin.Context) {
+	debug := router.Group("/debug")
+	debug.GET("/stats", func(c *gin.Context) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 
@@ -225,20 +230,18 @@ func main() {
 		})
 	})
 
-	// Job worker specific debug endpoint
-	router.GET("/debug/jobs", func(c *gin.Context) {
+	debug.GET("/jobs", func(c *gin.Context) {
 		c.JSON(200, predictionJobWorker.GetStatus())
 	})
 
-	router.GET("/debug/counterfactual", func(c *gin.Context) {
+	debug.GET("/counterfactual", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"counterfactual_service": counterfactualJobService.GetStatus(),
 		})
 	})
 
-	// Conditional shard health check endpoint
 	if useSharding {
-		router.GET("/debug/shards", func(c *gin.Context) {
+		debug.GET("/shards", func(c *gin.Context) {
 			shardsHealth := database.CheckShardsHealth()
 			c.JSON(200, gin.H{
 				"shards_health": shardsHealth,
@@ -246,8 +249,7 @@ func main() {
 			})
 		})
 	} else {
-		router.GET("/debug/database", func(c *gin.Context) {
-			// Simple database health check for single DB
+		debug.GET("/database", func(c *gin.Context) {
 			sqlDB, err := database.DB.DB()
 			if err != nil {
 				c.JSON(500, gin.H{

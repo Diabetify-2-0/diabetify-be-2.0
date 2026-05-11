@@ -37,6 +37,14 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		tokenString := parts[1]
 		jwtSecret := []byte(os.Getenv("JWT_SECRET_KEY"))
+		if len(jwtSecret) == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  "error",
+				"message": "Server misconfiguration: JWT secret not configured",
+			})
+			c.Abort()
+			return
+		}
 
 		// Parse and validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -92,7 +100,10 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		c.Set("user_id", uint(userID))
 		c.Set("email", email)
-		if role, ok := claims["role"].(string); ok {
+		validRoles := map[string]bool{
+			"USER": true, "DATA_SCIENTIST": true, "MEDICAL_EXPERT": true, "ADMIN": true,
+		}
+		if role, ok := claims["role"].(string); ok && validRoles[role] {
 			c.Set("role", role)
 		}
 		c.Next()
