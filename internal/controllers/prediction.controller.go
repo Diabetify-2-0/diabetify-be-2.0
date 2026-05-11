@@ -373,6 +373,7 @@ func (pc *PredictionController) GetJobStatus(c *gin.Context) {
 				response["data"].(gin.H)["result"] = gin.H{
 					"prediction_id":   prediction.ID,
 					"risk_score":      prediction.RiskScore,
+					"risk_label":      services.ScoreToRiskLabel(prediction.RiskScore),
 					"risk_percentage": prediction.RiskScore * 100,
 					"created_at":      prediction.CreatedAt,
 				}
@@ -542,6 +543,7 @@ func (pc *PredictionController) GetJobResult(c *gin.Context) {
 			"job_id":          job.ID,
 			"prediction_id":   prediction.ID,
 			"risk_score":      prediction.RiskScore,
+			"risk_label":      services.ScoreToRiskLabel(prediction.RiskScore),
 			"risk_percentage": prediction.RiskScore * 100,
 			"timestamp":       prediction.CreatedAt,
 			"user_data_used": gin.H{

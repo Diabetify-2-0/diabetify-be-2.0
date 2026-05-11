@@ -681,7 +681,6 @@ func (w *predictionJobWorker) getAverageUserSmokeCount(userID uint) (int, error)
 		return *profile.SmokeCount, nil
 	}
 
-	// Fallback to activity-based calculation only if profile.SmokeCount is not available.
 	user, err := w.userRepo.GetUserByID(userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get user %d for smoke count: %v", userID, err)
@@ -930,10 +929,8 @@ func (w *predictionJobWorker) calculateBrinkmanIndex(user *models.User, profile 
 	}
 	yearsOfSmoking := 0
 	if profile.AgeOfStopSmoking != nil && *profile.AgeOfStopSmoking != 0 {
-		// Case 1: User has stopped smoking. Duration is fixed.
 		yearsOfSmoking = *profile.AgeOfStopSmoking - ageOfSmoking
 	} else {
-		// Case 2: User is still smoking. Calculate duration up to their current age.
 		if user.DOB == nil {
 			return 0, fmt.Errorf("date of birth is required")
 		}
@@ -995,13 +992,11 @@ func (w *predictionJobWorker) boolToFloat(b bool) float64 {
 	return 0.0
 }
 
-// pollChallengerInfo polls MLOps every 30s for active challenger info and caches it in Redis.
 func (w *predictionJobWorker) pollChallengerInfo() {
 	defer w.wg.Done()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// Poll immediately on start
 	w.fetchAndCacheChallenger()
 
 	for {
@@ -1030,23 +1025,30 @@ func (w *predictionJobWorker) fetchAndCacheChallenger() {
 		}
 		_ = w.redisClient.SetActiveChallengerInfo(&info)
 	} else {
-		// 404 = no active challenger; clear stale cache
 		_ = w.redisClient.DeleteActiveChallengerInfo()
 	}
 }
 
-// featureColumnNames must match the order of features slice from calculateFeaturesFromProfile.
 var featureColumnNames = []string{
 	"age", "smoking_status", "is_cholesterol", "is_macrosomic_baby",
 	"physical_activity_frequency", "is_bloodline", "brinkman_index", "bmi", "is_hypertension",
 }
 
-// updateShadowChampionResult PATCHes the shadow prediction record in MLOps with the champion result.
-func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
-	riskLabel := "low"
-	if riskScore >= 0.5 {
-		riskLabel = "high"
+func ScoreToRiskLabel(riskScore float64) string {
+	switch {
+	case riskScore > 0.70:
+		return "very_high"
+	case riskScore > 0.55:
+		return "high"
+	case riskScore > 0.35:
+		return "medium"
+	default:
+		return "low"
 	}
+}
+
+func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
+	riskLabel := ScoreToRiskLabel(riskScore)
 	body, err := json.Marshal(map[string]interface{}{
 		"champion_result": map[string]interface{}{
 			"risk_score": riskScore,
@@ -1070,7 +1072,6 @@ func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore
 	resp.Body.Close()
 }
 
-// sendShadowPrediction fires an async POST to MLOps challenger endpoint (fire-and-forget).
 func (w *predictionJobWorker) sendShadowPrediction(jobID string, features []float64) {
 	if w.redisClient == nil {
 		return
