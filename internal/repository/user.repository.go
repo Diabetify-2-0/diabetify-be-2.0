@@ -44,8 +44,6 @@ func NewShardedUserRepository() UserRepository {
 }
 
 func (ur *userRepository) CreateUser(user *models.User) error {
-	user.Verified = false
-
 	if ur.useShards {
 		// For new users with ID = 0, we need special handling
 		if user.ID == 0 {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 // Test helper functions
@@ -169,6 +170,148 @@ func TestLoginUser(t *testing.T) {
 			mockService.AssertExpectations(t)
 		})
 	}
+}
+
+func TestRegisterUserRejectsPrivilegedRole(t *testing.T) {
+	controller, mockService := setupUserControllerWithMocks()
+
+	router := setupUserTestRouter()
+	router.POST("/users", controller.RegisterUser)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":    "admin@example.com",
+		"password": "password123",
+		"name":     "Admin Candidate",
+		"role":     "ADMIN",
+	})
+
+	req := httptest.NewRequest("POST", "/users", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "Public registration cannot assign privileged roles")
+
+	mockService.AssertExpectations(t)
+}
+
+func TestUpdateUserRejectsPayloadWithoutAllowedFields(t *testing.T) {
+	controller, mockService := setupUserControllerWithMocks()
+
+	mockService.On("GetUserByID", uint(1)).Return(&models.User{
+		ID:    1,
+		Email: "john@example.com",
+		Name:  "John",
+		Role:  "USER",
+	}, nil)
+
+	router := setupUserTestRouter()
+	router.Use(addUserAuthMiddleware(1))
+	router.PUT("/users/me", controller.UpdateUser)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"role": "ADMIN",
+	})
+
+	req := httptest.NewRequest("PUT", "/users/me", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["error"], "No updatable fields were provided")
+
+	mockService.AssertExpectations(t)
+}
+
+func TestUpdateUserDoesNotAllowRoleEscalation(t *testing.T) {
+	controller, mockService := setupUserControllerWithMocks()
+
+	mockService.On("GetUserByID", uint(1)).Return(&models.User{
+		ID:       1,
+		Email:    "john@example.com",
+		Password: "existing-hash",
+		Name:     "John",
+		Role:     "USER",
+		Verified: false,
+	}, nil)
+	mockService.
+		On("UpdateUser", mock.MatchedBy(func(user *models.User) bool {
+			return user.ID == 1 &&
+				user.Name == "Jane Doe" &&
+				user.Role == "USER" &&
+				user.Verified == false
+		})).
+		Return(nil)
+
+	router := setupUserTestRouter()
+	router.Use(addUserAuthMiddleware(1))
+	router.PUT("/users/me", controller.UpdateUser)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"name": "Jane Doe",
+		"role": "ADMIN",
+	})
+
+	req := httptest.NewRequest("PUT", "/users/me", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["message"], "User updated successfully")
+
+	mockService.AssertExpectations(t)
+}
+
+func TestPatchUserRejectsRestrictedFields(t *testing.T) {
+	controller, mockService := setupUserControllerWithMocks()
+
+	mockService.On("GetUserByID", uint(1)).Return(&models.User{
+		ID:    1,
+		Email: "john@example.com",
+		Name:  "John",
+		Role:  "USER",
+	}, nil)
+
+	router := setupUserTestRouter()
+	router.Use(addUserAuthMiddleware(1))
+	router.PATCH("/users/me", controller.PatchUser)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"role": "ADMIN",
+	})
+
+	req := httptest.NewRequest("PATCH", "/users/me", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Contains(t, response["error"], "field role cannot be updated")
+
+	mockService.AssertExpectations(t)
 }
 
 func TestGetCurrentUser(t *testing.T) {

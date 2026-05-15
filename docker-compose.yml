@@ -91,6 +91,12 @@ services:
       MLOPS_SERVICE_URL: ${MLOPS_SERVICE_URL:-http://host.docker.internal:8000}
     ports:
       - "${PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     depends_on:
       diabetify-db:
         condition: service_healthy
