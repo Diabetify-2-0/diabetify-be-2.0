@@ -2,10 +2,9 @@ package cache
 
 import (
 	"context"
+	"diabetify/internal/config"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -38,36 +37,19 @@ func NewRedisClient() (*RedisClient, error) {
 }
 
 func redisOptionsFromEnv() (*redis.Options, error) {
-	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
-		opt, err := redis.ParseURL(redisURL)
+	settings := config.Load()
+	if settings.Redis.URL != "" {
+		opt, err := redis.ParseURL(settings.Redis.URL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse REDIS_URL: %w", err)
 		}
 		return opt, nil
 	}
 
-	host := os.Getenv("REDIS_HOST")
-	if host == "" {
-		host = "localhost"
-	}
-	port := os.Getenv("REDIS_PORT")
-	if port == "" {
-		port = "6379"
-	}
-
-	db := 0
-	if rawDB := os.Getenv("REDIS_DB"); rawDB != "" {
-		parsedDB, err := strconv.Atoi(rawDB)
-		if err != nil {
-			return nil, fmt.Errorf("invalid REDIS_DB %q: %w", rawDB, err)
-		}
-		db = parsedDB
-	}
-
 	return &redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", host, port),
-		Password: os.Getenv("REDIS_PASSWORD"),
-		DB:       db,
+		Addr:     fmt.Sprintf("%s:%s", settings.Redis.Host, settings.Redis.Port),
+		Password: settings.Redis.Password,
+		DB:       settings.Redis.DB,
 	}, nil
 }
 

@@ -1,0 +1,27 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  go-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Docker Compose Config
+        run: docker compose config

@@ -1,13 +1,14 @@
 package controllers
 
 import (
+	"diabetify/internal/config"
+	"diabetify/internal/dto"
 	"diabetify/internal/models"
 	"diabetify/internal/services"
 	"diabetify/internal/utils"
 	"log"
 	"net/http"
 	"net/mail"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -269,7 +270,7 @@ func (uc *UserController) GetUserByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User retrieved successfully",
-		"data":    user,
+		"data":    dto.NewUserResponse(user),
 	})
 }
 
@@ -354,12 +355,10 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	existingUser.Password = ""
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User updated successfully",
-		"data":    existingUser,
+		"data":    dto.NewUserResponse(existingUser),
 	})
 }
 
@@ -449,7 +448,7 @@ func (uc *UserController) LoginUser(c *gin.Context) {
 		"role":    user.Role,
 		"exp":     time.Now().Add(time.Hour * 72).Unix(),
 	})
-	jwtSecret := []byte(os.Getenv("JWT_SECRET_KEY"))
+	jwtSecret := []byte(config.Load().JWT.Secret)
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -667,13 +666,10 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 		return
 	}
 
-	// Hide sensitive information
-	updatedUser.Password = ""
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User patched successfully",
-		"data":    updatedUser,
+		"data":    dto.NewUserResponse(updatedUser),
 	})
 }
 
@@ -713,7 +709,7 @@ func (uc *UserController) GetCurrentUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User information retrieved successfully",
-		"data":    user,
+		"data":    dto.NewUserResponse(user),
 	})
 }
 
@@ -766,14 +762,10 @@ func (uc *UserController) ListAllUsers(c *gin.Context) {
 		return
 	}
 
-	for _, u := range users {
-		u.Password = ""
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Users retrieved successfully",
-		"data":    users,
+		"data":    dto.NewUserResponses(users),
 	})
 }
 
@@ -846,12 +838,10 @@ func (uc *UserController) AdminPatchUser(c *gin.Context) {
 		})
 		return
 	}
-	updatedUser.Password = ""
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User updated successfully",
-		"data":    updatedUser,
+		"data":    dto.NewUserResponse(updatedUser),
 	})
 }
 

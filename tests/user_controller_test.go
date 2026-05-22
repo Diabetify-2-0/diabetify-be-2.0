@@ -380,10 +380,34 @@ func TestGetCurrentUser(t *testing.T) {
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			assert.NoError(t, err)
 			assert.Contains(t, response["message"], tt.expectedMsg)
+			if tt.expectedStatus == http.StatusOK {
+				data := response["data"].(map[string]interface{})
+				assert.NotContains(t, data, "password")
+			}
 
 			mockService.AssertExpectations(t)
 		})
 	}
+}
+
+func TestAdminRoutesRequireAdminRole(t *testing.T) {
+	controller, mockService := setupUserControllerWithMocks()
+	mockService.On("GetUserByID", uint(1)).Return(&models.User{
+		ID:    1,
+		Role:  "USER",
+		Email: "user@example.com",
+	}, nil)
+
+	router := setupUserTestRouter()
+	router.Use(addUserAuthMiddleware(1))
+	router.GET("/admin/users", controller.ListAllUsers)
+
+	req := httptest.NewRequest("GET", "/admin/users", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	mockService.AssertExpectations(t)
 }
 
 func TestForgotPassword(t *testing.T) {

@@ -2,10 +2,10 @@ package utils
 
 import (
 	"crypto/tls"
+	"diabetify/internal/config"
 	"fmt"
 	"log"
 	"net/smtp"
-	"os"
 )
 
 type MailConfig struct {
@@ -17,16 +17,14 @@ type MailConfig struct {
 }
 
 func LoadMailConfig() MailConfig {
+	settings := config.Load()
 	config := MailConfig{
-		SMTPHost: os.Getenv("SMTP_HOST"),
-		SMTPPort: os.Getenv("SMTP_PORT"),
-		Username: os.Getenv("SMTP_USERNAME"),
-		Password: os.Getenv("SMTP_PASSWORD"),
-		Sender:   os.Getenv("SMTP_SENDER"),
+		SMTPHost: settings.SMTP.Host,
+		SMTPPort: settings.SMTP.Port,
+		Username: settings.SMTP.Username,
+		Password: settings.SMTP.Password,
+		Sender:   settings.SMTP.Sender,
 	}
-
-	// Debugging: Print loaded configuration
-	fmt.Printf("Loaded MailConfig: %+v\n", config)
 
 	return config
 }

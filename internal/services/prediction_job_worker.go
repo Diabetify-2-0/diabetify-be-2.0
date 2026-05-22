@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"diabetify/internal/cache"
+	"diabetify/internal/config"
 	"diabetify/internal/ml"
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
@@ -12,8 +13,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -93,11 +92,7 @@ func NewPredictionJobWorker(
 		fmt.Printf("Warning: Failed to connect to Redis: %v\n", err)
 	}
 
-	mlopsURL := os.Getenv("MLOPS_SERVICE_URL")
-	if mlopsURL == "" {
-		mlopsURL = "http://localhost:8000"
-	}
-	mlopsURL = strings.TrimRight(mlopsURL, "/")
+	mlopsURL := config.Load().MLOps.ServiceURL
 
 	return &predictionJobWorker{
 		jobRepo:         jobRepo,

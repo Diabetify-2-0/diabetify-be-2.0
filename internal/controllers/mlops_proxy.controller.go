@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"diabetify/internal/config"
 	"diabetify/internal/repository"
 
 	"github.com/gin-gonic/gin"
@@ -31,11 +31,7 @@ var mlopsHTTPClient = &http.Client{
 }
 
 func getMLOpsBaseURL() string {
-	url := os.Getenv("MLOPS_SERVICE_URL")
-	if url == "" {
-		url = "http://localhost:8000"
-	}
-	return strings.TrimRight(url, "/")
+	return config.Load().MLOps.ServiceURL
 }
 
 // MLOpsProxy returns a Gin handler that proxies the current request to the MLOps service.

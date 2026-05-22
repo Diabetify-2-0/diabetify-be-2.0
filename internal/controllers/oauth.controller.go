@@ -2,12 +2,12 @@ package controllers
 
 import (
 	"context"
+	"diabetify/internal/config"
 	"diabetify/internal/services"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -94,8 +94,8 @@ func validateGoogleTokenClaims(tokenInfo map[string]interface{}) error {
 }
 
 func validateGoogleAudience(tokenInfo map[string]interface{}) error {
-	configuredClientIDs := strings.TrimSpace(os.Getenv("GOOGLE_KEY"))
-	if configuredClientIDs == "" {
+	configuredClientIDs := config.Load().Google.ClientIDs
+	if len(configuredClientIDs) == 0 {
 		return errGoogleClientIDNotConfigured
 	}
 
@@ -104,8 +104,8 @@ func validateGoogleAudience(tokenInfo map[string]interface{}) error {
 		return errGoogleAudienceMissing
 	}
 
-	for _, clientID := range strings.Split(configuredClientIDs, ",") {
-		if strings.TrimSpace(clientID) == audience {
+	for _, clientID := range configuredClientIDs {
+		if clientID == audience {
 			return nil
 		}
 	}
@@ -211,7 +211,7 @@ func (oc *OauthController) GoogleAuth(c *gin.Context) {
 		"exp":     time.Now().Add(time.Hour * 72).Unix(),
 	})
 
-	jwtSecret := []byte(os.Getenv("JWT_SECRET_KEY"))
+	jwtSecret := []byte(config.Load().JWT.Secret)
 	tokenString, err := jwtToken.SignedString(jwtSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

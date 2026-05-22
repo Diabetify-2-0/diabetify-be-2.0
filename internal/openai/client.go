@@ -3,10 +3,10 @@ package openai
 import (
 	"bytes"
 	"context"
+	"diabetify/internal/config"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -194,7 +194,7 @@ func buildGlobalImportanceExplanation(features map[string]FeatureInfo) string {
 }
 
 func NewClient() (*Client, error) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := config.Load().OpenAI.APIKey
 	if apiKey == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY environment variable is not set")
 	}

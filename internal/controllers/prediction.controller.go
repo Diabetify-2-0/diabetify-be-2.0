@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"diabetify/internal/config"
+	"diabetify/internal/dto"
 	"diabetify/internal/ml"
 	"diabetify/internal/models"
 	"diabetify/internal/openai"
@@ -9,7 +11,6 @@ import (
 	"diabetify/internal/services"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -444,7 +445,7 @@ func (pc *PredictionController) GetJobResult(c *gin.Context) {
 	// Check if job is completed
 	if job.Status != models.JobStatusCompleted {
 		c.JSON(http.StatusOK, gin.H{
-			"status":  "succcess",
+			"status":  "success",
 			"message": fmt.Sprintf("Job is not completed yet. Current status: %s", job.Status),
 			"current_status": gin.H{
 				"status": job.Status,
@@ -628,7 +629,7 @@ func (pc *PredictionController) GetUserJobs(c *gin.Context) {
 		"status":  "success",
 		"message": "Jobs retrieved successfully",
 		"data": gin.H{
-			"jobs":  jobs,
+			"jobs":  dto.NewPredictionJobResponses(jobs),
 			"count": len(jobs),
 		},
 	})
@@ -1074,7 +1075,7 @@ func (pc *PredictionController) GetLatestPredictionExplanation(c *gin.Context) {
 		return
 	}
 
-	if os.Getenv("OPENAI_API_KEY") == "" {
+	if config.Load().OpenAI.APIKey == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "OpenAI API key is not configured",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"diabetify/internal/controllers"
@@ -31,6 +32,53 @@ func addCounterfactualAuthMiddleware(userID uint) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set("user_id", userID)
 		c.Next()
+	}
+}
+
+func TestCounterfactualSubmitRejectsInvalidPayload(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		expectedErr string
+	}{
+		{
+			name:        "unknown top-level field",
+			body:        `{"instance":{"features":{"age":50}},"constraints":{},"unexpected":true}`,
+			expectedErr: "unknown field",
+		},
+		{
+			name:        "missing instance features",
+			body:        `{"instance":{"features":{}},"constraints":{}}`,
+			expectedErr: "instance.features is required",
+		},
+		{
+			name:        "overlapping immutable and mutable features",
+			body:        `{"instance":{"features":{"age":50}},"constraints":{"immutable_features":["age"],"mutable_allowed":["age"]}}`,
+			expectedErr: "immutable and mutable overlap",
+		},
+		{
+			name:        "invalid generation bounds",
+			body:        `{"instance":{"features":{"age":50}},"constraints":{},"generation":{"total_cfs":25}}`,
+			expectedErr: "generation.total_cfs must be between 1 and 20",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			controller, _, _ := setupCounterfactualControllerWithMocks()
+
+			router := setupCounterfactualTestRouter()
+			router.Use(addCounterfactualAuthMiddleware(1))
+			router.POST("/counterfactual", controller.SubmitJob)
+
+			req := httptest.NewRequest(http.MethodPost, "/counterfactual", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), tt.expectedErr)
+		})
 	}
 }
 

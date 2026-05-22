@@ -1,0 +1,214 @@
+@startuml
+top to bottom direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam ArrowThickness 1
+skinparam nodesep 55
+skinparam ranksep 65
+
+title Diabetify Backend API 2.0 Component Diagram
+
+package "Diabetify Backend API 2.0" {
+  package "Presentation Layer" {
+    [API Routes] as Routes
+    [Auth Middleware] as AuthMW
+    [Role / Admin Middleware] as RoleMW
+
+    [User & Auth Controller] as UserCtrl
+    [OAuth Controller] as OAuthCtrl
+    [Verification Controller] as VerifyCtrl
+    [User Profile Controller] as ProfileCtrl
+    [Activity Controller] as ActivityCtrl
+    [Prediction Controller] as PredictCtrl
+    [Counterfactual Controller] as CFCtrl
+    [XAI Chatbot Controller] as ChatCtrl
+    [Knowledge Base Controller] as KBCtrl
+    [Control Panel Controller] as PanelCtrl
+    [Model Governance Controller] as GovCtrl
+  }
+
+  package "Application / Orchestration Layer" {
+    [Prediction Job Orchestrator] as PredictionOrch
+    [Counterfactual Job Orchestrator] as CFOrch
+    [Chat Session Service] as ChatSession
+    [Knowledge Base Orchestrator] as KBOrch
+    [Model Governance Orchestrator] as GovOrch
+    [Notification Service] as NotificationSvc
+  }
+
+  package "Data Access Layer" {
+    [Repository Layer] as Repos
+    [GORM / Database Access] as GormDB
+  }
+
+  package "Integration Layer" {
+    package "User Support Integration" {
+      [Email Adapter] as Email
+      [Google OAuth Adapter] as GoogleAuth
+    }
+
+    package "Async & Cache Integration" {
+      [RabbitMQ Adapter] as RabbitMQAdapter
+      [Redis Adapter] as Redis
+    }
+
+    package "Service & Knowledge Clients" {
+      [RAG Chatbot Client] as RAGClient
+      [Model Governance Client] as GovClient
+      [Model Registry Client] as RegistryClient
+      [Vector Store Client] as VectorClient
+      [Medical Source Client] as MedicalSourceClient
+    }
+  }
+}
+
+database "PostgreSQL Database" as DB
+queue "RabbitMQ" as MQ
+collections "Redis Cache" as RedisStore
+cloud "Google OAuth" as Google
+cloud "SMTP Server" as SMTP
+rectangle "ML Prediction Service" as MLService
+rectangle "Counterfactual Planner Service" as CFService
+rectangle "XAI Chatbot / RAG Service" as RAGService
+rectangle "Continual Learning &\nModel Governance Service" as GovService
+database "Model Registry" as ModelRegistry
+database "Vector Store /\nKnowledge Base" as VectorDB
+cloud "Sumber Pedoman Medis" as MedicalSources
+
+Routes --> AuthMW : protected user endpoints
+Routes --> RoleMW : internal / admin endpoints
+Routes --> UserCtrl : public auth endpoints
+Routes --> OAuthCtrl : Google OAuth login
+Routes --> VerifyCtrl : verification endpoints
+
+AuthMW --> UserCtrl
+AuthMW --> ProfileCtrl
+AuthMW --> ActivityCtrl
+AuthMW --> PredictCtrl
+AuthMW --> CFCtrl
+AuthMW --> ChatCtrl
+
+RoleMW --> PanelCtrl
+RoleMW --> GovCtrl
+RoleMW --> KBCtrl
+
+UserCtrl --> Repos
+UserCtrl --> NotificationSvc
+
+OAuthCtrl --> Repos
+OAuthCtrl --> GoogleAuth
+
+VerifyCtrl --> Repos
+VerifyCtrl --> NotificationSvc
+
+ProfileCtrl --> Repos
+ActivityCtrl --> Repos
+
+PredictCtrl --> Repos
+PredictCtrl --> PredictionOrch
+
+CFCtrl --> Repos
+CFCtrl --> CFOrch
+
+ChatCtrl --> Repos
+ChatCtrl --> ChatSession
+ChatCtrl --> RAGClient
+
+KBCtrl --> KBOrch
+KBCtrl --> Repos
+
+PanelCtrl --> Repos
+PanelCtrl --> GovOrch
+PanelCtrl --> RegistryClient
+PanelCtrl --> KBOrch
+
+GovCtrl --> Repos
+GovCtrl --> GovOrch
+
+PredictionOrch --> Repos
+PredictionOrch --> RabbitMQAdapter
+PredictionOrch --> Redis
+
+CFOrch --> Repos
+CFOrch --> RabbitMQAdapter
+CFOrch --> Redis
+
+ChatSession --> Repos
+
+KBOrch --> Repos
+KBOrch --> VectorClient
+KBOrch --> MedicalSourceClient
+
+GovOrch --> Repos
+GovOrch --> GovClient
+GovOrch --> RegistryClient
+GovOrch --> NotificationSvc
+
+NotificationSvc --> Email
+
+Repos --> GormDB
+GormDB --> DB
+
+Email --> SMTP
+GoogleAuth --> Google
+
+RabbitMQAdapter --> MQ : publish / consume\nprediction and counterfactual jobs
+Redis --> RedisStore
+
+MQ --> MLService : prediction request
+MLService --> MQ : prediction result
+MQ --> CFService : counterfactual request
+CFService --> MQ : counterfactual result
+RAGClient --> RAGService
+GovClient --> GovService
+RegistryClient --> ModelRegistry
+VectorClient --> VectorDB
+MedicalSourceClient --> MedicalSources
+
+note right of Repos
+Contains repositories for:
+- users, profiles, activities
+- verification and reset password
+- predictions and prediction jobs
+- counterfactual jobs/results
+- chat sessions/messages
+- feedback, audit logs, and validation reports
+end note
+
+note right of PredictionOrch
+Coordinates asynchronous
+prediction job submission,
+status tracking, and result storage.
+end note
+
+note right of CFOrch
+Coordinates counterfactual
+planning jobs and result retrieval.
+Heavy optimization runs in the
+Counterfactual Planner Service.
+end note
+
+note right of GovOrch
+Coordinates drift monitoring,
+candidate model validation,
+approval workflow, and model
+lifecycle tasks through the
+Model Governance Service.
+end note
+
+note right of KBOrch
+Coordinates retrieval, curation,
+and storage of medical guideline
+references for the RAG knowledge base.
+end note
+
+legend bottom
+== Design Intent ==
+The backend acts as an API gateway and orchestration layer.
+Heavy XAI/ML tasks are delegated to separate containers defined
+in the Diabetify 2.0 Container Diagram.
+endlegend
+
+@enduml

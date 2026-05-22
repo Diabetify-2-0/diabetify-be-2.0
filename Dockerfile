@@ -12,11 +12,14 @@ FROM alpine:3.20
 
 ENV TZ=Asia/Jakarta
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata \
+    && adduser -D -u 10001 appuser
 
 WORKDIR /app
 
 COPY --from=builder /out/diabetify-be /app/diabetify-be
+
+USER appuser
 
 EXPOSE 8080
 

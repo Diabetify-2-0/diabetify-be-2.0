@@ -1,0 +1,49 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam ArrowThickness 1
+skinparam nodesep 60
+skinparam ranksep 70
+
+title Diabetify 1.0 Container Diagram
+
+actor "Pengguna" as User
+
+package "Sistem Diabetify 1.0" {
+  rectangle "Aplikasi Diabetify Mobile\n[Android App]\nKotlin + Jetpack Compose" as Mobile
+
+  rectangle "Diabetify Backend API\n[Application]\nGo + Gin" as Backend
+
+  rectangle "Diabetify ML Prediction Service\n[Application]\nPython + XGBoost + SHAP" as ML
+
+  database "PostgreSQL Database\n[Data Store]\nMenyimpan data pengguna,\nprofil, aktivitas, prediksi,\njob, verification, dan reset password" as DB
+
+  queue "RabbitMQ\n[Message Broker]\nMeneruskan job prediksi async" as MQ
+
+  collections "Redis Cache\n[Cache]\nMenyimpan hasil what-if sementara" as Redis
+}
+
+cloud "Google OAuth\n[External System]" as Google
+cloud "SMTP Server\n[External System]" as SMTP
+cloud "OpenAI API\n[External System]" as OpenAI
+
+User --> Mobile : Menggunakan aplikasi
+Mobile --> Backend : Mengirim request REST API\n(auth, profil, aktivitas, prediksi)
+
+Backend --> DB : Menyimpan dan membaca data
+Backend --> SMTP : Mengirim email verifikasi\n dan reset password
+Backend --> Google : Memverifikasi token autentikasi Google
+Backend --> OpenAI : Menghasilkan penjelasan\nhasil prediksi
+Backend --> MQ : Mempublikasikan job prediksi
+Backend --> Redis : Menyimpan / membaca\nhasil what-if sementara
+
+
+MQ --> ML : Meneruskan request prediksi
+ML --> MQ : Mengirim hasil prediksi
+MQ --> Backend : Mengirim hasil prediksi\nuntuk dikonsumsi backend
+
+
+@enduml
