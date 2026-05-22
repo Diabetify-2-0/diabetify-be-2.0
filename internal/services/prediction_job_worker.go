@@ -447,6 +447,9 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	// Update shadow prediction with champion result (fire-and-forget)
 	go w.updateShadowChampionResult(jobID, rabbitResponse.Prediction)
+
+	// Log features + SHAP to MLOps for drift detection (fire-and-forget)
+	go w.sendDriftLog(jobID, featureInfo, prediction)
 }
 
 func (w *predictionJobWorker) worker(workerID int) {
@@ -1162,6 +1165,58 @@ func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore
 	resp, err := w.shadowClient.Do(req)
 	if err != nil {
 		fmt.Printf("Warning: failed to update shadow champion result for job %s: %v\n", jobID, err)
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+}
+
+func (w *predictionJobWorker) sendDriftLog(jobID string, featureInfo map[string]interface{}, pred *models.Prediction) {
+	featureMap := map[string]float64{
+		"age":                         float64(pred.Age),
+		"smoking_status":              float64(pred.SmokingStatus),
+		"is_cholesterol":              w.boolToFloat(pred.IsCholesterol),
+		"is_macrosomic_baby":          float64(pred.IsMacrosomicBaby),
+		"physical_activity_frequency": float64(pred.PhysicalActivityFrequency),
+		"is_bloodline":                w.boolToFloat(pred.IsBloodline),
+		"brinkman_index":              float64(pred.BrinkmanScore),
+		"bmi":                         pred.BMI,
+		"is_hypertension":             w.boolToFloat(pred.IsHypertension),
+	}
+	shapMap := map[string]float64{
+		"age":                         pred.AgeShap,
+		"smoking_status":              pred.SmokingStatusShap,
+		"is_cholesterol":              pred.IsCholesterolShap,
+		"is_macrosomic_baby":          pred.IsMacrosomicBabyShap,
+		"physical_activity_frequency": pred.PhysicalActivityFrequencyShap,
+		"is_bloodline":                pred.IsBloodlineShap,
+		"brinkman_index":              pred.BrinkmanScoreShap,
+		"bmi":                         pred.BMIShap,
+		"is_hypertension":             pred.IsHypertensionShap,
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"job_id":      jobID,
+		"features":    featureMap,
+		"shap_values": shapMap,
+		"risk_score":  pred.RiskScore,
+	})
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/drift/log", w.mlopsURL), bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.shadowClient.Do(req)
+	if err != nil {
+		fmt.Printf("Warning: drift log request failed: %v\n", err)
 		return
 	}
 	io.Copy(io.Discard, resp.Body)
