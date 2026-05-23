@@ -1,9 +1,9 @@
 package database
 
 import (
+	"diabetify/internal/config"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -39,12 +39,13 @@ type ShardConfig struct {
 
 // ConnectDatabase - original function for backward compatibility
 func ConnectDatabase() {
-	host := os.Getenv("DB_HOST")
-	user := os.Getenv("DB_USER")
-	password := os.Getenv("DB_PASSWORD")
-	dbname := os.Getenv("DB_NAME")
-	port := os.Getenv("DB_PORT")
-	sslmode := os.Getenv("DB_SSLMODE")
+	settings := config.Load()
+	host := settings.DB.Host
+	user := settings.DB.User
+	password := settings.DB.Password
+	dbname := settings.DB.Name
+	port := settings.DB.Port
+	sslmode := settings.DB.SSLMode
 
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s "+
@@ -53,7 +54,7 @@ func ConnectDatabase() {
 	)
 
 	newLogger := logger.New(
-		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		log.New(log.Writer(), "\r\n", log.LstdFlags),
 		logger.Config{
 			SlowThreshold:             time.Millisecond * 500,
 			Colorful:                  true,
@@ -91,6 +92,7 @@ func ConnectDatabase() {
 }
 
 func ConnectShardedDatabase() {
+	settings := config.Load()
 	Manager = &ShardManager{
 		shards: make(map[string]*gorm.DB),
 	}
@@ -98,23 +100,23 @@ func ConnectShardedDatabase() {
 	shards := []ShardConfig{
 		{
 			Name:     "shard1",
-			Host:     os.Getenv("DB_HOST"), // 159.223.47.205
-			Port:     os.Getenv("DB_PORT"), // 6432
-			User:     os.Getenv("DB_USER"),
-			Password: os.Getenv("DB_PASSWORD"),
-			DBName:   os.Getenv("DB_NAME"),
-			SSLMode:  os.Getenv("DB_SSLMODE"),
+			Host:     settings.DB.Host,
+			Port:     settings.DB.Port,
+			User:     settings.DB.User,
+			Password: settings.DB.Password,
+			DBName:   settings.DB.Name,
+			SSLMode:  settings.DB.SSLMode,
 			MinRange: 1,
 			MaxRange: 5000,
 		},
 		{
 			Name:     "shard2",
-			Host:     os.Getenv("DB_HOST2"), // 167.172.76.144
-			Port:     os.Getenv("DB_PORT"),  // 6432
-			User:     os.Getenv("DB_USER"),
-			Password: os.Getenv("DB_PASSWORD"),
-			DBName:   os.Getenv("DB_NAME"),
-			SSLMode:  os.Getenv("DB_SSLMODE"),
+			Host:     settings.DB.Host2,
+			Port:     settings.DB.Port,
+			User:     settings.DB.User,
+			Password: settings.DB.Password,
+			DBName:   settings.DB.Name,
+			SSLMode:  settings.DB.SSLMode,
 			MinRange: 5001,
 			MaxRange: 10000,
 		},
@@ -142,7 +144,7 @@ func connectToShard(config ShardConfig) *gorm.DB {
 	)
 
 	newLogger := logger.New(
-		log.New(os.Stdout, fmt.Sprintf("\r\n[%s] ", config.Name), log.LstdFlags),
+		log.New(log.Writer(), fmt.Sprintf("\r\n[%s] ", config.Name), log.LstdFlags),
 		logger.Config{
 			SlowThreshold:             time.Millisecond * 500,
 			Colorful:                  true,

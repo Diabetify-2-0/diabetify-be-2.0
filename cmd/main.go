@@ -4,17 +4,21 @@ import (
 	"context"
 	"diabetify/database"
 	"diabetify/docs"
+	"diabetify/internal/cache"
+	"diabetify/internal/config"
 	"diabetify/internal/controllers"
 	"diabetify/internal/middleware"
 	"diabetify/internal/ml"
 	"diabetify/internal/repository"
 	"diabetify/internal/services"
 	"diabetify/routes"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
-	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,9 +27,14 @@ import (
 
 func main() {
 	loadEnv()
+	settings := config.Load()
+
+	if err := settings.ValidateRuntime(); err != nil {
+		log.Fatal(err)
+	}
 
 	// Check if sharding is enabled
-	useSharding := os.Getenv("USE_SHARDING") == "true"
+	useSharding := settings.UseSharding
 	log.Printf("Sharding mode: %v", useSharding)
 
 	// Swagger Documentation
@@ -62,9 +71,6 @@ func main() {
 		counterfactualJobRepo repository.CounterfactualJobRepository
 	)
 
-	predictionJobRepo = repository.NewPredictionJobRepository(database.DB)
-	counterfactualJobRepo = repository.NewCounterfactualJobRepository(database.DB)
-
 	if useSharding {
 		// Use sharded repositories
 		forgotPasswordRepo = repository.NewResetPasswordRepository(nil)
@@ -74,6 +80,8 @@ func main() {
 		articleRepo = repository.NewArticleRepository(database.DB)
 		profileRepo = repository.NewShardedUserProfileRepository()
 		predictionRepo = repository.NewShardedPredictionRepository()
+		predictionJobRepo = repository.NewShardedPredictionJobRepository()
+		counterfactualJobRepo = repository.NewCounterfactualJobRepository(nil)
 		log.Println("Initialized sharded repositories")
 	} else {
 		// Use single database repositories
@@ -84,10 +92,12 @@ func main() {
 		articleRepo = repository.NewArticleRepository(database.DB)
 		profileRepo = repository.NewUserProfileRepository(database.DB)
 		predictionRepo = repository.NewPredictionRepository(database.DB)
+		predictionJobRepo = repository.NewPredictionJobRepository(database.DB)
+		counterfactualJobRepo = repository.NewCounterfactualJobRepository(database.DB)
 		log.Println("Initialized single database repositories")
 	}
 
-	rabbitMQURL := getEnv("RABBITMQ_URL", "amqp://admin:password123@localhost:5672/")
+	rabbitMQURL := settings.RabbitMQ.URL
 
 	log.Printf("Connecting to ML service via RabbitMQ: %s", rabbitMQURL)
 
@@ -200,6 +210,18 @@ func main() {
 		c.JSON(200, response)
 	})
 
+	router.GET("/health/live", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "Service is alive",
+		})
+	})
+
+	router.GET("/health/ready", func(c *gin.Context) {
+		statusCode, payload := buildReadinessPayload(c.Request.Context(), predictionJobWorker, counterfactualJobService)
+		c.JSON(statusCode, payload)
+	})
+
 	routes.RegisterUserRoutes(router, userController)
 	routes.RegisterVerificationRoutes(router, verificationController)
 	routes.RegisterSwaggerRoutes(router)
@@ -213,7 +235,8 @@ func main() {
 	routes.RegisterExpertRoutes(router, userRepo)
 
 	// Debug endpoints
-	router.GET("/debug/stats", func(c *gin.Context) {
+	debug := router.Group("/debug")
+	debug.GET("/stats", func(c *gin.Context) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 
@@ -225,20 +248,18 @@ func main() {
 		})
 	})
 
-	// Job worker specific debug endpoint
-	router.GET("/debug/jobs", func(c *gin.Context) {
+	debug.GET("/jobs", func(c *gin.Context) {
 		c.JSON(200, predictionJobWorker.GetStatus())
 	})
 
-	router.GET("/debug/counterfactual", func(c *gin.Context) {
+	debug.GET("/counterfactual", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"counterfactual_service": counterfactualJobService.GetStatus(),
 		})
 	})
 
-	// Conditional shard health check endpoint
 	if useSharding {
-		router.GET("/debug/shards", func(c *gin.Context) {
+		debug.GET("/shards", func(c *gin.Context) {
 			shardsHealth := database.CheckShardsHealth()
 			c.JSON(200, gin.H{
 				"shards_health": shardsHealth,
@@ -246,8 +267,7 @@ func main() {
 			})
 		})
 	} else {
-		router.GET("/debug/database", func(c *gin.Context) {
-			// Simple database health check for single DB
+		debug.GET("/database", func(c *gin.Context) {
 			sqlDB, err := database.DB.DB()
 			if err != nil {
 				c.JSON(500, gin.H{
@@ -271,10 +291,7 @@ func main() {
 	}
 
 	// Start the server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	port := settings.Port
 
 	log.Printf("Server starting on port %s", port)
 	log.Printf("API Documentation: http://localhost:%s/swagger/index.html", port)
@@ -302,8 +319,31 @@ func main() {
 	log.Printf("Using %d CPU cores for job processing", workerCount)
 	log.Printf("Async prediction jobs ready via RabbitMQ")
 
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal("Failed to start server:", err)
+	serverErrors := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+		close(serverErrors)
+	}()
+
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrors:
+		if err != nil {
+			log.Fatal("Failed to start server:", err)
+		}
+	case sig := <-shutdownSignals:
+		log.Printf("Received signal %s, shutting down server...", sig)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
+		}
+		log.Println("HTTP server stopped")
 	}
 }
 
@@ -317,10 +357,73 @@ func loadEnv() {
 	log.Println("No .env file found; using process environment")
 }
 
-func getEnv(key, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return fallback
+func buildReadinessPayload(
+	ctx context.Context,
+	predictionJobWorker services.PredictionJobWorker,
+	counterfactualJobService services.CounterfactualJobService,
+) (int, gin.H) {
+	checks := gin.H{
+		"database":       checkDatabase(ctx),
+		"prediction_job": predictionJobWorker.GetStatus(),
+		"counterfactual": counterfactualJobService.GetStatus(),
+		"redis":          checkRedis(),
 	}
-	return value
+
+	ready := true
+	if dbCheck, ok := checks["database"].(gin.H); ok && dbCheck["ready"] != true {
+		ready = false
+	}
+	if workerStatus, ok := checks["prediction_job"].(map[string]interface{}); ok {
+		if workerStatus["running"] != true || workerStatus["rabbitmq_connected"] != true {
+			ready = false
+		}
+	}
+	if cfStatus, ok := checks["counterfactual"].(map[string]interface{}); ok {
+		if cfStatus["running"] != true || cfStatus["rabbitmq_connected"] != true {
+			ready = false
+		}
+	}
+	if redisCheck, ok := checks["redis"].(gin.H); ok && redisCheck["ready"] != true {
+		ready = false
+	}
+
+	status := "success"
+	message := "Service is ready"
+	statusCode := http.StatusOK
+	if !ready {
+		status = "error"
+		message = "Service is not ready"
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	return statusCode, gin.H{
+		"status":  status,
+		"message": message,
+		"checks":  checks,
+	}
+}
+
+func checkDatabase(ctx context.Context) gin.H {
+	sqlDB, err := database.DB.DB()
+	if err != nil {
+		return gin.H{"ready": false, "error": err.Error()}
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(pingCtx); err != nil {
+		return gin.H{"ready": false, "error": err.Error()}
+	}
+
+	return gin.H{"ready": true}
+}
+
+func checkRedis() gin.H {
+	client, err := cache.NewRedisClient()
+	if err != nil {
+		return gin.H{"ready": false, "error": err.Error()}
+	}
+	defer client.Close()
+
+	return gin.H{"ready": true}
 }

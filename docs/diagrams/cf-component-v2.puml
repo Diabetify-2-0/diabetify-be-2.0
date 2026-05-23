@@ -1,0 +1,139 @@
+@startuml
+top to bottom direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam ArrowThickness 1
+skinparam nodesep 55
+skinparam ranksep 65
+
+title Diabetify 2.0 Counterfactual Planner Service - Component Diagram
+
+package "Counterfactual Planner Service" {
+  package "Interface Layer" {
+    [Counterfactual Job Consumer] as JobConsumer
+    [Counterfactual Result Publisher] as ResultPublisher
+    [Health Check Endpoint] as HealthCheck
+  }
+
+  package "Planning Orchestration Layer" {
+    [Planning Request Validator] as RequestValidator
+    [User Context Builder] as ContextBuilder
+    [Constraint Parser] as ConstraintParser
+    [Counterfactual Planning Orchestrator] as PlannerOrch
+  }
+
+  package "Counterfactual Generation Layer" {
+    [Mutable Feature Selector] as FeatureSelector
+    [Action Space Builder] as ActionSpace
+    [Candidate Generator] as CandidateGenerator
+    [Optimization Engine] as Optimizer
+    [Feasibility Validator] as FeasibilityValidator
+    [Scenario Ranker] as ScenarioRanker
+    [Recommendation Formatter] as Formatter
+  }
+
+  package "Policy & Knowledge Layer" {
+    [Feature Mutability Rules] as MutabilityRules
+    [Lifestyle Constraint Rules] as ConstraintRules
+    [Medical Safety Rules] as MedicalRules
+  }
+
+  package "Integration Layer" {
+    [RabbitMQ Adapter] as RabbitMQAdapter
+    [ML Prediction Client] as MLClient
+    [Model Registry Client] as RegistryClient
+    [Audit / Trace Logger] as AuditLogger
+  }
+}
+
+queue "RabbitMQ" as MQ
+rectangle "ML Prediction Service" as MLService
+database "Model Registry" as ModelRegistry
+
+RabbitMQAdapter --> MQ : consume planning jobs\npublish results
+JobConsumer --> RabbitMQAdapter
+ResultPublisher --> RabbitMQAdapter
+
+JobConsumer --> RequestValidator
+RequestValidator --> ContextBuilder
+RequestValidator --> ConstraintParser
+
+ContextBuilder --> PlannerOrch
+ConstraintParser --> PlannerOrch
+
+PlannerOrch --> FeatureSelector
+PlannerOrch --> ActionSpace
+PlannerOrch --> CandidateGenerator
+PlannerOrch --> Optimizer
+PlannerOrch --> FeasibilityValidator
+PlannerOrch --> ScenarioRanker
+PlannerOrch --> Formatter
+PlannerOrch --> ResultPublisher
+PlannerOrch --> AuditLogger : record planning traces
+
+FeatureSelector --> MutabilityRules
+ActionSpace --> ConstraintRules
+CandidateGenerator --> ActionSpace
+Optimizer --> CandidateGenerator
+Optimizer --> MLClient : evaluate risk score
+FeasibilityValidator --> ConstraintRules
+FeasibilityValidator --> MedicalRules
+ScenarioRanker --> FeasibilityValidator
+Formatter --> ScenarioRanker
+
+RegistryClient --> ModelRegistry : read active model metadata
+PlannerOrch --> RegistryClient
+
+MLClient --> MLService : score candidate scenarios
+
+HealthCheck --> RabbitMQAdapter
+HealthCheck --> MLClient
+HealthCheck --> RegistryClient
+
+note right of Optimizer
+Searches for candidate actions
+that reduce risk while minimizing
+unrealistic or excessive changes.
+end note
+
+note right of FeasibilityValidator
+Rejects candidates that violate
+user constraints, feature mutability,
+or medical safety rules.
+end note
+
+note right of ScenarioRanker
+Ranks feasible scenarios by:
+- risk reduction
+- actionability
+- proximity
+- sparsity
+- plausibility
+end note
+
+legend bottom
+== Design Intent ==
+This service generates actionable counterfactual recommendations.
+It does not replace the prediction model; it uses the ML Prediction
+Service to evaluate candidate scenarios and returns feasible plans.
+endlegend
+
+JobConsumer -[hidden]right-> ResultPublisher
+ResultPublisher -[hidden]right-> HealthCheck
+RequestValidator -[hidden]right-> ContextBuilder
+ContextBuilder -[hidden]right-> ConstraintParser
+FeatureSelector -[hidden]right-> ActionSpace
+ActionSpace -[hidden]right-> CandidateGenerator
+CandidateGenerator -[hidden]right-> Optimizer
+Optimizer -[hidden]right-> FeasibilityValidator
+FeasibilityValidator -[hidden]right-> ScenarioRanker
+ScenarioRanker -[hidden]right-> Formatter
+MutabilityRules -[hidden]right-> ConstraintRules
+ConstraintRules -[hidden]right-> MedicalRules
+RabbitMQAdapter -[hidden]right-> MLClient
+MLClient -[hidden]right-> RegistryClient
+RegistryClient -[hidden]right-> AuditLogger
+
+@enduml

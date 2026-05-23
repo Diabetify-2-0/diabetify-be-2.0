@@ -5,26 +5,33 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"diabetify/internal/config"
 	"diabetify/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
+
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+}
 
 var mlopsHTTPClient = &http.Client{
 	Timeout: 120 * time.Second, // generous timeout for file uploads and synchronous training
 }
 
 func getMLOpsBaseURL() string {
-	url := os.Getenv("MLOPS_SERVICE_URL")
-	if url == "" {
-		url = "http://localhost:8000"
-	}
-	return strings.TrimRight(url, "/")
+	return config.Load().MLOps.ServiceURL
 }
 
 // MLOpsProxy returns a Gin handler that proxies the current request to the MLOps service.
@@ -82,6 +89,9 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 
 		if !needsEnrichment {
 			for key, values := range resp.Header {
+				if hopByHopHeaders[key] {
+					continue
+				}
 				for _, v := range values {
 					c.Header(key, v)
 				}
@@ -104,39 +114,43 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 		var response map[string]interface{}
 		if err := json.Unmarshal(body, &response); err == nil {
 			if data, ok := response["data"].([]interface{}); ok {
+				uniqueIDs := make(map[uint]bool)
 				for _, item := range data {
-					if dataset, ok := item.(map[string]interface{}); ok {
-						if uploadedByVal, ok := dataset["uploaded_by"]; ok {
-							uploadedByInt, _ := uploadedByVal.(float64)
-							uploaderID := uint(uploadedByInt)
-
-							user, err := userRepo.GetUserByID(uploaderID)
-							if err == nil && user != nil {
-								dataset["uploader_name"] = user.Name
-							} else {
-								dataset["uploader_name"] = fmt.Sprintf("User #%d", uploaderID)
+					if row, ok := item.(map[string]interface{}); ok {
+						for _, key := range []string{"uploaded_by", "triggered_by", "trained_by"} {
+							if val, ok := row[key]; ok {
+								if f, ok := val.(float64); ok {
+									uniqueIDs[uint(f)] = true
+								}
 							}
 						}
-						if triggeredByVal, ok := dataset["triggered_by"]; ok {
-							triggeredByInt, _ := triggeredByVal.(float64)
-							triggeredID := uint(triggeredByInt)
+					}
+				}
 
-							user, err := userRepo.GetUserByID(triggeredID)
-							if err == nil && user != nil {
-								dataset["triggered_by_name"] = user.Name
-							} else {
-								dataset["triggered_by_name"] = fmt.Sprintf("User #%d", triggeredID)
+				userNames := make(map[uint]string, len(uniqueIDs))
+				for id := range uniqueIDs {
+					if user, err := userRepo.GetUserByID(id); err == nil && user != nil {
+						userNames[id] = user.Name
+					} else {
+						userNames[id] = fmt.Sprintf("User #%d", id)
+					}
+				}
+
+				for _, item := range data {
+					if row, ok := item.(map[string]interface{}); ok {
+						if val, ok := row["uploaded_by"]; ok {
+							if f, ok := val.(float64); ok {
+								row["uploader_name"] = userNames[uint(f)]
 							}
 						}
-						if trainedByVal, ok := dataset["trained_by"]; ok {
-							trainedByInt, _ := trainedByVal.(float64)
-							trainedID := uint(trainedByInt)
-
-							user, err := userRepo.GetUserByID(trainedID)
-							if err == nil && user != nil {
-								dataset["trained_by_name"] = user.Name
-							} else {
-								dataset["trained_by_name"] = fmt.Sprintf("User #%d", trainedID)
+						if val, ok := row["triggered_by"]; ok {
+							if f, ok := val.(float64); ok {
+								row["triggered_by_name"] = userNames[uint(f)]
+							}
+						}
+						if val, ok := row["trained_by"]; ok {
+							if f, ok := val.(float64); ok {
+								row["trained_by_name"] = userNames[uint(f)]
 							}
 						}
 					}
@@ -150,7 +164,7 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 		}
 
 		for key, values := range resp.Header {
-			if key == "Content-Length" || key == "Content-Encoding" || key == "Transfer-Encoding" {
+			if hopByHopHeaders[key] || key == "Content-Length" || key == "Content-Encoding" {
 				continue
 			}
 			for _, v := range values {

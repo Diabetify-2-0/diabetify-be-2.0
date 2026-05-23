@@ -1,9 +1,9 @@
 package middleware
 
 import (
+	"diabetify/internal/config"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +36,16 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		tokenString := parts[1]
-		jwtSecret := []byte(os.Getenv("JWT_SECRET_KEY"))
+		settings := config.Load()
+		jwtSecret := []byte(settings.JWT.Secret)
+		if len(jwtSecret) == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  "error",
+				"message": "Server misconfiguration: JWT secret not configured",
+			})
+			c.Abort()
+			return
+		}
 
 		// Parse and validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -92,7 +101,10 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		c.Set("user_id", uint(userID))
 		c.Set("email", email)
-		if role, ok := claims["role"].(string); ok {
+		validRoles := map[string]bool{
+			"USER": true, "DATA_SCIENTIST": true, "MEDICAL_EXPERT": true, "ADMIN": true,
+		}
+		if role, ok := claims["role"].(string); ok && validRoles[role] {
 			c.Set("role", role)
 		}
 		c.Next()
@@ -123,14 +135,11 @@ func RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 
 // CORSMiddleware handles CORS headers for cross-origin requests
 func CORSMiddleware() gin.HandlerFunc {
-	allowedOriginsEnv := os.Getenv("ALLOWED_ORIGINS")
-	if allowedOriginsEnv == "" {
-		allowedOriginsEnv = "http://localhost:3000"
-	}
+	settings := config.Load()
 
 	allowedOrigins := make(map[string]bool)
-	for _, origin := range strings.Split(allowedOriginsEnv, ",") {
-		allowedOrigins[strings.TrimSpace(origin)] = true
+	for _, origin := range settings.CORS.AllowedOrigins {
+		allowedOrigins[origin] = true
 	}
 
 	return func(c *gin.Context) {

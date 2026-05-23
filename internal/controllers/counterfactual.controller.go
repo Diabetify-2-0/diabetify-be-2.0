@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"diabetify/internal/dto"
+	"diabetify/internal/httpx"
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
 	"diabetify/internal/services"
@@ -32,35 +34,23 @@ func NewCounterfactualController(
 func (cc *CounterfactualController) SubmitJob(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"status":  "error",
-			"message": "Unauthorized access",
-		})
+		httpx.Unauthorized(c)
 		return
 	}
 
-	var payload map[string]interface{}
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Invalid request payload",
-			"error":   err.Error(),
-		})
+	var req dto.CounterfactualSubmitRequest
+	if err := httpx.BindJSONStrict(c, &req); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "Invalid request payload", err)
 		return
 	}
 
-	if !hasRequiredCounterfactualPayload(payload) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Missing required fields",
-			"error":   "Payload must include 'instance' and 'constraints'",
-		})
+	if err := req.Validate(); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "Invalid counterfactual request", err)
 		return
 	}
 
 	jobID := uuid.New().String()
-	payload["request_id"] = jobID
-	payload["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	payload := req.ToWorkerPayload(jobID)
 
 	requestJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -284,7 +274,7 @@ func (cc *CounterfactualController) GetUserJobs(c *gin.Context) {
 		"status":  "success",
 		"message": "Counterfactual jobs retrieved",
 		"data": gin.H{
-			"jobs":  jobs,
+			"jobs":  dto.NewCounterfactualJobResponses(jobs),
 			"count": len(jobs),
 		},
 	})
@@ -333,10 +323,4 @@ func (cc *CounterfactualController) CancelJob(c *gin.Context) {
 			"cancelled_at": time.Now(),
 		},
 	})
-}
-
-func hasRequiredCounterfactualPayload(payload map[string]interface{}) bool {
-	_, hasInstance := payload["instance"]
-	_, hasConstraints := payload["constraints"]
-	return hasInstance && hasConstraints
 }

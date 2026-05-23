@@ -4,15 +4,15 @@ import (
 	"bytes"
 	"context"
 	"diabetify/internal/cache"
+	"diabetify/internal/config"
 	"diabetify/internal/ml"
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +66,7 @@ type predictionJobWorker struct {
 	rabbitURL       string
 	mlopsURL        string
 	shadowClient    *http.Client
+	shadowSem       chan struct{}
 }
 
 // NewPredictionJobWorker creates a new prediction job worker
@@ -91,11 +92,7 @@ func NewPredictionJobWorker(
 		fmt.Printf("Warning: Failed to connect to Redis: %v\n", err)
 	}
 
-	mlopsURL := os.Getenv("MLOPS_SERVICE_URL")
-	if mlopsURL == "" {
-		mlopsURL = "http://localhost:8000"
-	}
-	mlopsURL = strings.TrimRight(mlopsURL, "/")
+	mlopsURL := config.Load().MLOps.ServiceURL
 
 	return &predictionJobWorker{
 		jobRepo:         jobRepo,
@@ -113,6 +110,7 @@ func NewPredictionJobWorker(
 		rabbitURL:       rabbitURL,
 		mlopsURL:        mlopsURL,
 		shadowClient:    &http.Client{Timeout: 5 * time.Second},
+		shadowSem:       make(chan struct{}, 50),
 	}
 }
 
@@ -178,16 +176,102 @@ func (w *predictionJobWorker) Stop() {
 		w.redisClient.Close()
 	}
 
-	// Close RabbitMQ connection
+	close(w.stopChan)
+	w.wg.Wait()
+
+	w.mu.Lock()
 	if w.responseChannel != nil {
 		w.responseChannel.Close()
 	}
 	if w.conn != nil {
 		w.conn.Close()
 	}
+	w.mu.Unlock()
+}
 
-	close(w.stopChan)
-	w.wg.Wait()
+func (w *predictionJobWorker) reconnectWithBackoff() (<-chan amqp.Delivery, error) {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-w.stopChan:
+			return nil, fmt.Errorf("shutdown")
+		default:
+		}
+
+		w.mu.Lock()
+		if w.responseChannel != nil {
+			w.responseChannel.Close()
+			w.responseChannel = nil
+		}
+		if w.conn != nil {
+			w.conn.Close()
+			w.conn = nil
+		}
+		w.mu.Unlock()
+
+		conn, err := amqp.Dial(w.rabbitURL)
+		if err != nil {
+			fmt.Printf("Warning: RabbitMQ reconnect attempt %d failed: %v, retrying in %s\n", attempt, err, backoff)
+			select {
+			case <-w.stopChan:
+				return nil, fmt.Errorf("shutdown")
+			case <-time.After(backoff):
+			}
+			if backoff*2 < maxBackoff {
+				backoff *= 2
+			} else {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		ch, err := conn.Channel()
+		if err != nil {
+			conn.Close()
+			fmt.Printf("Warning: RabbitMQ channel open attempt %d failed: %v, retrying in %s\n", attempt, err, backoff)
+			select {
+			case <-w.stopChan:
+				return nil, fmt.Errorf("shutdown")
+			case <-time.After(backoff):
+			}
+			if backoff*2 < maxBackoff {
+				backoff *= 2
+			} else {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		msgs, err := ch.Consume(
+			"ml.prediction.response", "response_handler", false, false, false, false, nil,
+		)
+		if err != nil {
+			ch.Close()
+			conn.Close()
+			fmt.Printf("Warning: RabbitMQ consume register attempt %d failed: %v, retrying in %s\n", attempt, err, backoff)
+			select {
+			case <-w.stopChan:
+				return nil, fmt.Errorf("shutdown")
+			case <-time.After(backoff):
+			}
+			if backoff*2 < maxBackoff {
+				backoff *= 2
+			} else {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		w.mu.Lock()
+		w.conn = conn
+		w.responseChannel = ch
+		w.mu.Unlock()
+
+		fmt.Printf("RabbitMQ reconnected successfully after %d attempt(s)\n", attempt)
+		return msgs, nil
+	}
 }
 
 func (w *predictionJobWorker) SubmitJob(jobRequest models.PredictionJobRequest) error {
@@ -272,7 +356,18 @@ func (w *predictionJobWorker) handleMLResponses(msgs <-chan amqp.Delivery) {
 			return
 		case msg, ok := <-msgs:
 			if !ok {
-				return
+				select {
+				case <-w.stopChan:
+					return
+				default:
+				}
+				fmt.Println("ERROR: RabbitMQ response channel closed unexpectedly; all pending jobs would hang. Attempting reconnect...")
+				newMsgs, err := w.reconnectWithBackoff()
+				if err != nil {
+					return
+				}
+				msgs = newMsgs
+				continue
 			}
 			var rabbitResponse RabbitMQPredictionResponse
 			if err := json.Unmarshal(msg.Body, &rabbitResponse); err != nil {
@@ -291,6 +386,7 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	job, err := w.jobRepo.GetJobByID(jobID)
 	if err != nil {
+		fmt.Printf("Warning: job %s not found in DB: %v\n", jobID, err)
 		return
 	}
 
@@ -306,7 +402,7 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	modelResponse := convertToModelsResponse(rabbitResponse)
 
-	if w.isWhatIfJob(jobID) {
+	if job.IsWhatIf {
 		featureInfo := w.extractFeatureInfoFromMLResponse(rabbitResponse, 0)
 		whatIfResult := map[string]interface{}{
 			"job_id":               jobID,
@@ -504,14 +600,6 @@ func (w *predictionJobWorker) buildFeatureExplanations(response *models.Predicti
 	return explanations
 }
 
-func (w *predictionJobWorker) isWhatIfJob(jobID string) bool {
-	job, err := w.jobRepo.GetJobByID(jobID)
-	if err != nil {
-		return false
-	}
-	return job.IsWhatIf
-}
-
 func (w *predictionJobWorker) extractFeatureInfoFromMLResponse(response *RabbitMQPredictionResponse, avgSmokeCount int) map[string]interface{} {
 	featureInfo := make(map[string]interface{})
 
@@ -683,7 +771,6 @@ func (w *predictionJobWorker) getAverageUserSmokeCount(userID uint) (int, error)
 		return *profile.SmokeCount, nil
 	}
 
-	// Fallback to activity-based calculation only if profile.SmokeCount is not available.
 	user, err := w.userRepo.GetUserByID(userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get user %d for smoke count: %v", userID, err)
@@ -932,10 +1019,8 @@ func (w *predictionJobWorker) calculateBrinkmanIndex(user *models.User, profile 
 	}
 	yearsOfSmoking := 0
 	if profile.AgeOfStopSmoking != nil && *profile.AgeOfStopSmoking != 0 {
-		// Case 1: User has stopped smoking. Duration is fixed.
 		yearsOfSmoking = *profile.AgeOfStopSmoking - ageOfSmoking
 	} else {
-		// Case 2: User is still smoking. Calculate duration up to their current age.
 		if user.DOB == nil {
 			return 0, fmt.Errorf("date of birth is required")
 		}
@@ -997,13 +1082,11 @@ func (w *predictionJobWorker) boolToFloat(b bool) float64 {
 	return 0.0
 }
 
-// pollChallengerInfo polls MLOps every 30s for active challenger info and caches it in Redis.
 func (w *predictionJobWorker) pollChallengerInfo() {
 	defer w.wg.Done()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// Poll immediately on start
 	w.fetchAndCacheChallenger()
 
 	for {
@@ -1032,23 +1115,37 @@ func (w *predictionJobWorker) fetchAndCacheChallenger() {
 		}
 		_ = w.redisClient.SetActiveChallengerInfo(&info)
 	} else {
-		// 404 = no active challenger; clear stale cache
 		_ = w.redisClient.DeleteActiveChallengerInfo()
 	}
 }
 
-// featureColumnNames must match the order of features slice from calculateFeaturesFromProfile.
 var featureColumnNames = []string{
 	"age", "smoking_status", "is_cholesterol", "is_macrosomic_baby",
 	"physical_activity_frequency", "is_bloodline", "brinkman_index", "bmi", "is_hypertension",
 }
 
-// updateShadowChampionResult PATCHes the shadow prediction record in MLOps with the champion result.
-func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
-	riskLabel := "low"
-	if riskScore >= 0.5 {
-		riskLabel = "high"
+func ScoreToRiskLabel(riskScore float64) string {
+	switch {
+	case riskScore > 0.70:
+		return "very_high"
+	case riskScore > 0.55:
+		return "high"
+	case riskScore > 0.35:
+		return "medium"
+	default:
+		return "low"
 	}
+}
+
+func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
+	select {
+	case w.shadowSem <- struct{}{}:
+		defer func() { <-w.shadowSem }()
+	default:
+		return
+	}
+
+	riskLabel := ScoreToRiskLabel(riskScore)
 	body, err := json.Marshal(map[string]interface{}{
 		"champion_result": map[string]interface{}{
 			"risk_score": riskScore,
@@ -1069,11 +1166,18 @@ func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore
 		fmt.Printf("Warning: failed to update shadow champion result for job %s: %v\n", jobID, err)
 		return
 	}
+	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 }
 
-// sendShadowPrediction fires an async POST to MLOps challenger endpoint (fire-and-forget).
 func (w *predictionJobWorker) sendShadowPrediction(jobID string, features []float64) {
+	select {
+	case w.shadowSem <- struct{}{}:
+		defer func() { <-w.shadowSem }()
+	default:
+		return
+	}
+
 	if w.redisClient == nil {
 		return
 	}
@@ -1108,5 +1212,6 @@ func (w *predictionJobWorker) sendShadowPrediction(jobID string, features []floa
 		fmt.Printf("Warning: shadow prediction request failed: %v\n", err)
 		return
 	}
+	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 }

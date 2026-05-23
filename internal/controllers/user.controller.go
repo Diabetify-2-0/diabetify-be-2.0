@@ -1,13 +1,16 @@
 package controllers
 
 import (
+	"diabetify/internal/config"
+	"diabetify/internal/dto"
 	"diabetify/internal/models"
 	"diabetify/internal/services"
 	"diabetify/internal/utils"
 	"log"
 	"net/http"
-	"os"
+	"net/mail"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -45,16 +48,143 @@ type RegisterUserRequest struct {
 	Name     string  `json:"name" binding:"required,min=2"`
 	Gender   *string `json:"gender"`
 	DOB      *string `json:"dob"`
-	Role     string  `json:"role" binding:"omitempty,oneof=ADMIN USER DATA_SCIENTIST MEDICAL_EXPERT"` // Default: USER if not provided
+	Role     string  `json:"role" binding:"omitempty,oneof=ADMIN USER DATA_SCIENTIST MEDICAL_EXPERT"`
+}
+
+type SelfUserUpdateRequest struct {
+	Email    *string `json:"email" binding:"omitempty,email"`
+	Password *string `json:"password" binding:"omitempty,min=8"`
+	Name     *string `json:"name" binding:"omitempty,min=2"`
+	Gender   *string `json:"gender" binding:"omitempty,oneof=male female"`
+	DOB      *string `json:"dob"`
+}
+
+type fieldValidationError struct {
+	message    string
+	restricted bool
+}
+
+func (e *fieldValidationError) Error() string {
+	return e.message
+}
+
+func (req SelfUserUpdateRequest) ApplyToUser(user *models.User) {
+	if req.Email != nil {
+		user.Email = strings.TrimSpace(*req.Email)
+	}
+	if req.Password != nil {
+		user.Password = *req.Password
+	}
+	if req.Name != nil {
+		user.Name = strings.TrimSpace(*req.Name)
+	}
+	if req.Gender != nil {
+		user.Gender = req.Gender
+	}
+	if req.DOB != nil {
+		user.DOB = req.DOB
+	}
+}
+
+func (req SelfUserUpdateRequest) HasUpdates() bool {
+	return req.Email != nil ||
+		req.Password != nil ||
+		req.Name != nil ||
+		req.Gender != nil ||
+		req.DOB != nil
+}
+
+func sanitizeSelfUserPatchData(patchData map[string]interface{}) (map[string]interface{}, error) {
+	allowed := map[string]func(interface{}) (interface{}, error){
+		"email": func(value interface{}) (interface{}, error) {
+			email, ok := value.(string)
+			if !ok {
+				return nil, errInvalidFieldValue("email")
+			}
+			email = strings.TrimSpace(email)
+			if email == "" {
+				return nil, errInvalidFieldValue("email")
+			}
+			if _, err := mail.ParseAddress(email); err != nil {
+				return nil, errInvalidFieldValue("email")
+			}
+			return email, nil
+		},
+		"password": func(value interface{}) (interface{}, error) {
+			password, ok := value.(string)
+			if !ok || len(password) < 8 {
+				return nil, errInvalidFieldValue("password")
+			}
+			return password, nil
+		},
+		"name": func(value interface{}) (interface{}, error) {
+			name, ok := value.(string)
+			if !ok {
+				return nil, errInvalidFieldValue("name")
+			}
+			name = strings.TrimSpace(name)
+			if len(name) < 2 {
+				return nil, errInvalidFieldValue("name")
+			}
+			return name, nil
+		},
+		"gender": func(value interface{}) (interface{}, error) {
+			gender, ok := value.(string)
+			if !ok {
+				return nil, errInvalidFieldValue("gender")
+			}
+			gender = strings.TrimSpace(gender)
+			if gender != "male" && gender != "female" {
+				return nil, errInvalidFieldValue("gender")
+			}
+			return gender, nil
+		},
+		"dob": func(value interface{}) (interface{}, error) {
+			dob, ok := value.(string)
+			if !ok || strings.TrimSpace(dob) == "" {
+				return nil, errInvalidFieldValue("dob")
+			}
+			return dob, nil
+		},
+	}
+
+	sanitized := make(map[string]interface{}, len(patchData))
+	for key, value := range patchData {
+		validator, ok := allowed[key]
+		if !ok {
+			return nil, errForbiddenSelfField(key)
+		}
+
+		sanitizedValue, err := validator(value)
+		if err != nil {
+			return nil, err
+		}
+		sanitized[key] = sanitizedValue
+	}
+
+	return sanitized, nil
+}
+
+func errForbiddenSelfField(field string) error {
+	return &fieldValidationError{
+		message:    "field " + field + " cannot be updated",
+		restricted: true,
+	}
+}
+
+func errInvalidFieldValue(field string) error {
+	return &fieldValidationError{
+		message: "invalid value for field " + field,
+	}
 }
 
 // RegisterUser godoc
 // @Summary Register a new user
-// @Description Register a new user. Role is optional and defaults to USER. Valid roles: ADMIN, USER, DATA_SCIENTIST, MEDICAL_EXPERT
+// @Description Register a new user. Public registration always creates USER accounts.
 // @Tags users
 // @Accept json
 // @Produce json
-// @Param request body RegisterUserRequest true "User registration data (role optional, defaults to USER)"
+// @Param request body RegisterUserRequest true "User registration data"
 // @Success 201 {object} map[string]interface{} "User registered successfully"
 // @Failure 400 {object} map[string]interface{} "Invalid request data or invalid role"
 // @Failure 500 {object} map[string]interface{} "Failed to create user"
@@ -71,9 +201,16 @@ func (uc *UserController) RegisterUser(c *gin.Context) {
 		return
 	}
 
-	// Set default role to USER if not provided
+	// Public registration must never grant privileged roles.
 	if req.Role == "" {
 		req.Role = "USER"
+	} else if req.Role != "USER" {
+		c.JSON(http.StatusForbidden, gin.H{
+			"status":  "error",
+			"message": "Public registration cannot assign privileged roles",
+			"error":   "Use the admin workflow to create privileged accounts",
+		})
+		return
 	}
 
 	// Call service to create user (validation, password hashing, email duplicate check)
@@ -87,21 +224,9 @@ func (uc *UserController) RegisterUser(c *gin.Context) {
 		return
 	}
 
-	var message string
-	switch req.Role {
-	case "ADMIN":
-		message = "Admin registered successfully."
-	case "DATA_SCIENTIST":
-		message = "Data Scientist registered successfully."
-	case "MEDICAL_EXPERT":
-		message = "Medical Expert registered successfully."
-	default:
-		message = "User registered successfully. Please verify your email."
-	}
-
 	c.JSON(http.StatusCreated, gin.H{
 		"status":  "success",
-		"message": message,
+		"message": "User registered successfully. Please verify your email.",
 		"data": gin.H{
 			"id":    user.ID,
 			"email": user.Email,
@@ -145,7 +270,7 @@ func (uc *UserController) GetUserByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User retrieved successfully",
-		"data":    user,
+		"data":    dto.NewUserResponse(user),
 	})
 }
 
@@ -184,8 +309,10 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	var user models.User
-	if err := c.ShouldBindJSON(&user); err != nil {
+	originalEmail := existingUser.Email
+
+	var req SelfUserUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
 			"message": "Invalid request data",
@@ -194,12 +321,20 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// Set the user ID from the JWT token
-	user.ID = userID.(uint)
+	if !req.HasUpdates() {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Invalid request data",
+			"error":   "No updatable fields were provided",
+		})
+		return
+	}
+
+	req.ApplyToUser(existingUser)
 
 	// Prevent changing email to one that already exists
-	if user.Email != "" && user.Email != existingUser.Email {
-		_, err := uc.service.GetUserByEmail(user.Email)
+	if existingUser.Email != "" && existingUser.Email != originalEmail {
+		_, err := uc.service.GetUserByEmail(existingUser.Email)
 		if err == nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"status":  "error",
@@ -211,7 +346,7 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 	}
 
 	// Service will handle password hashing and validation
-	if err := uc.service.UpdateUser(&user); err != nil {
+	if err := uc.service.UpdateUser(existingUser); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to update user",
@@ -220,12 +355,10 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	user.Password = ""
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User updated successfully",
-		"data":    user,
+		"data":    dto.NewUserResponse(existingUser),
 	})
 }
 
@@ -315,7 +448,7 @@ func (uc *UserController) LoginUser(c *gin.Context) {
 		"role":    user.Role,
 		"exp":     time.Now().Add(time.Hour * 72).Unix(),
 	})
-	jwtSecret := []byte(os.Getenv("JWT_SECRET_KEY"))
+	jwtSecret := []byte(config.Load().JWT.Secret)
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -471,8 +604,35 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 		return
 	}
 
+	sanitizedPatchData, err := sanitizeSelfUserPatchData(patchData)
+	if err != nil {
+		message := "Invalid request data"
+		errorText := err.Error()
+		statusCode := http.StatusBadRequest
+		if fieldErr, ok := err.(*fieldValidationError); ok && fieldErr.restricted {
+			statusCode = http.StatusForbidden
+			message = "Attempted to update restricted fields"
+		}
+
+		c.JSON(statusCode, gin.H{
+			"status":  "error",
+			"message": message,
+			"error":   errorText,
+		})
+		return
+	}
+
+	if len(sanitizedPatchData) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Invalid request data",
+			"error":   "No updatable fields were provided",
+		})
+		return
+	}
+
 	// Prevent changing email to one that already exists
-	if email, hasEmail := patchData["email"].(string); hasEmail && email != existingUser.Email {
+	if email, hasEmail := sanitizedPatchData["email"].(string); hasEmail && email != existingUser.Email {
 		// Check if email already exists
 		_, err := uc.service.GetUserByEmail(email)
 		if err == nil {
@@ -486,7 +646,7 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 	}
 
 	// Apply the patch to the user through service (handles password hashing)
-	if err := uc.service.PatchUser(userID.(uint), patchData); err != nil {
+	if err := uc.service.PatchUser(userID.(uint), sanitizedPatchData); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
 			"message": "Failed to update user",
@@ -506,13 +666,10 @@ func (uc *UserController) PatchUser(c *gin.Context) {
 		return
 	}
 
-	// Hide sensitive information
-	updatedUser.Password = ""
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User patched successfully",
-		"data":    updatedUser,
+		"data":    dto.NewUserResponse(updatedUser),
 	})
 }
 
@@ -552,7 +709,7 @@ func (uc *UserController) GetCurrentUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User information retrieved successfully",
-		"data":    user,
+		"data":    dto.NewUserResponse(user),
 	})
 }
 
@@ -605,14 +762,10 @@ func (uc *UserController) ListAllUsers(c *gin.Context) {
 		return
 	}
 
-	for _, u := range users {
-		u.Password = ""
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Users retrieved successfully",
-		"data":    users,
+		"data":    dto.NewUserResponses(users),
 	})
 }
 
@@ -685,12 +838,10 @@ func (uc *UserController) AdminPatchUser(c *gin.Context) {
 		})
 		return
 	}
-	updatedUser.Password = ""
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User updated successfully",
-		"data":    updatedUser,
+		"data":    dto.NewUserResponse(updatedUser),
 	})
 }
 

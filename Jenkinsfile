@@ -4,7 +4,9 @@ pipeline {
     stages {
         stage('Test') {
             steps {
-                echo "Testing the app..."
+                sh 'go test ./...'
+                sh 'go vet ./...'
+                sh 'docker compose -f docker-compose.yml config'
             }
         }
         stage('Prepare') {
@@ -28,9 +30,6 @@ pipeline {
                     script {
                         sh '''
                             cat "${ENV_FILE}" > .env
-
-                            echo "Using the following .env contents:"
-                            cat .env
 
                             docker compose -f docker-compose.yml up -d
                         '''

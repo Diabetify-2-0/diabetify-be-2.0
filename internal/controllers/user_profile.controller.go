@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"diabetify/internal/dto"
 	"diabetify/internal/models"
 	"diabetify/internal/services"
 	"net/http"
@@ -53,7 +54,7 @@ func (pc *UserProfileController) GetUserProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "User profile retrieved successfully",
-		"data":    profile,
+		"data":    dto.NewUserProfileResponse(profile),
 	})
 }
 
@@ -109,7 +110,7 @@ func (pc *UserProfileController) CreateUserProfile(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"status":  "success",
 		"message": "Profile created successfully",
-		"data":    createdProfile,
+		"data":    dto.NewUserProfileResponse(createdProfile),
 	})
 }
 
@@ -165,7 +166,7 @@ func (pc *UserProfileController) UpdateUserProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Profile updated successfully",
-		"data":    profile,
+		"data":    dto.NewUserProfileResponse(profile),
 	})
 }
 
@@ -266,6 +267,6 @@ func (pc *UserProfileController) PatchUserProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Profile patched successfully",
-		"data":    updatedProfile,
+		"data":    dto.NewUserProfileResponse(updatedProfile),
 	})
 }

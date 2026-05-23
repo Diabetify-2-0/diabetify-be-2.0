@@ -1,9 +1,8 @@
 package services
 
 import (
-	"bytes"
-	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // UserService defines the interface for user service
@@ -43,21 +44,14 @@ func NewUserService(userRepo repository.UserRepository, rpRepo repository.ResetP
 	}
 }
 
-// hashPassword hashes a password using SHA256 + salt
+// hashPassword hashes a password using bcrypt.
 func (s *userService) hashPassword(password string) (string, error) {
-	salt := make([]byte, 8)
-	_, err := rand.Read(salt)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
 
-	// SHA256
-	h := sha256.New()
-	h.Write([]byte(password))
-	h.Write(salt)
-	hash := h.Sum(nil)
-
-	return hex.EncodeToString(salt) + hex.EncodeToString(hash), nil
+	return string(hash), nil
 }
 
 // CreateUser creates a new user with validation
@@ -117,6 +111,19 @@ func (s *userService) CreateUser(email, password, name, role string, gender, dob
 
 // VerifyPassword verifies a password against a hash
 func (s *userService) VerifyPassword(hashedPassword, password string) bool {
+	if hashedPassword == "" {
+		return false
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err == nil {
+		return true
+	}
+
+	return verifyLegacySHA256Password(hashedPassword, password)
+}
+
+// verifyLegacySHA256Password preserves login compatibility for pre-bcrypt accounts.
+func verifyLegacySHA256Password(hashedPassword, password string) bool {
 	if len(hashedPassword) < 16 {
 		return false
 	}
@@ -136,7 +143,7 @@ func (s *userService) VerifyPassword(hashedPassword, password string) bool {
 	h.Write(salt)
 	hash := h.Sum(nil)
 
-	return bytes.Equal(hash, expectedHash)
+	return subtle.ConstantTimeCompare(hash, expectedHash) == 1
 }
 
 // GetUserByEmail retrieves a user by email
