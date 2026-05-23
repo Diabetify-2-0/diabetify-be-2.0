@@ -89,6 +89,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
       MLOPS_SERVICE_URL: ${MLOPS_SERVICE_URL:-http://host.docker.internal:8000}
+      CHATBOT_SERVICE_URL: ${CHATBOT_SERVICE_URL:-http://host.docker.internal:8023}
+      XAI_INTERNAL_API_KEY: ${XAI_INTERNAL_API_KEY:-}
     ports:
       - "${PORT:-8080}:8080"
     depends_on:

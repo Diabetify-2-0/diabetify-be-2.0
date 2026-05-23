@@ -349,6 +349,8 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	_ = w.jobRepo.UpdateJobStatusWithResult(jobID, "completed", prediction.ID)
 
+	go syncXaiToChatbot(job.UserID, rabbitResponse)
+
 	// Update shadow prediction with champion result (fire-and-forget)
 	go w.updateShadowChampionResult(jobID, rabbitResponse.Prediction)
 }
