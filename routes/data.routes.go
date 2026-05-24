@@ -10,10 +10,11 @@ import (
 
 // RegisterDataRoutes registers MLOps proxy routes for Data Scientists.
 // All routes require authentication and the DATA_SCIENTIST (or ADMIN) role.
-func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository) {
+func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository, auditMiddleware gin.HandlerFunc) {
 	data := router.Group("/data")
 	data.Use(middleware.AuthMiddleware())
 	data.Use(middleware.RoleMiddleware("DATA_SCIENTIST", "ADMIN"))
+	data.Use(auditMiddleware)
 	{
 		// Dataset management
 		data.POST("/datasets", controllers.MLOpsProxy("/datasets", userRepo))

@@ -69,6 +69,7 @@ func main() {
 		predictionRepo        repository.PredictionRepository
 		predictionJobRepo     repository.PredictionJobRepository
 		counterfactualJobRepo repository.CounterfactualJobRepository
+		auditLogRepo          repository.AuditLogRepository
 	)
 
 	if useSharding {
@@ -82,6 +83,7 @@ func main() {
 		predictionRepo = repository.NewShardedPredictionRepository()
 		predictionJobRepo = repository.NewShardedPredictionJobRepository()
 		counterfactualJobRepo = repository.NewCounterfactualJobRepository(nil)
+		auditLogRepo = repository.NewAuditLogRepository(database.DB)
 		log.Println("Initialized sharded repositories")
 	} else {
 		// Use single database repositories
@@ -94,6 +96,7 @@ func main() {
 		predictionRepo = repository.NewPredictionRepository(database.DB)
 		predictionJobRepo = repository.NewPredictionJobRepository(database.DB)
 		counterfactualJobRepo = repository.NewCounterfactualJobRepository(database.DB)
+		auditLogRepo = repository.NewAuditLogRepository(database.DB)
 		log.Println("Initialized single database repositories")
 	}
 
@@ -222,7 +225,10 @@ func main() {
 		c.JSON(statusCode, payload)
 	})
 
-	routes.RegisterUserRoutes(router, userController)
+	auditMiddleware := middleware.AuditMiddleware(auditLogRepo)
+	auditLogController := controllers.NewAuditLogController(auditLogRepo, userRepo)
+
+	routes.RegisterUserRoutes(router, userController, auditMiddleware)
 	routes.RegisterVerificationRoutes(router, verificationController)
 	routes.RegisterSwaggerRoutes(router)
 	routes.RegisterOauthRoutes(router, oauthController)
@@ -231,8 +237,9 @@ func main() {
 	routes.RegisterUserProfileRoutes(router, profileController)
 	routes.RegisterPredictionRoutes(router, predictionController)
 	routes.RegisterCounterfactualRoutes(router, counterfactualController)
-	routes.RegisterDataRoutes(router, userRepo)
-	routes.RegisterExpertRoutes(router, userRepo)
+	routes.RegisterDataRoutes(router, userRepo, auditMiddleware)
+	routes.RegisterExpertRoutes(router, userRepo, auditMiddleware)
+	routes.RegisterAuditLogRoutes(router, auditLogController)
 
 	// Debug endpoints
 	debug := router.Group("/debug")

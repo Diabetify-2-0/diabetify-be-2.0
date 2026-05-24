@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterUserRoutes(router *gin.Engine, userController *controllers.UserController) {
+func RegisterUserRoutes(router *gin.Engine, userController *controllers.UserController, auditMiddleware gin.HandlerFunc) {
 	userRoutesPublic := router.Group("/users")
 	{
 		userRoutesPublic.POST("/", userController.RegisterUser)
@@ -26,6 +26,7 @@ func RegisterUserRoutes(router *gin.Engine, userController *controllers.UserCont
 
 	adminRoutes := router.Group("/admin")
 	adminRoutes.Use(middleware.AuthMiddleware())
+	adminRoutes.Use(auditMiddleware)
 	{
 		adminRoutes.GET("/users", userController.ListAllUsers)
 		adminRoutes.PATCH("/users/:id", userController.AdminPatchUser)

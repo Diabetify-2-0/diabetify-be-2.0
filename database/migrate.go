@@ -21,6 +21,7 @@ func MigrateDatabase() error {
 		&models.Prediction{},
 		&models.PredictionJob{},
 		&models.CounterfactualJob{},
+		&models.AuditLog{},
 	)
 
 	if err != nil {
@@ -59,6 +60,7 @@ func migrateOnShard(db *gorm.DB) error {
 		&models.Prediction{},
 		&models.PredictionJob{},
 		&models.CounterfactualJob{},
+		&models.AuditLog{},
 	)
 
 	if err != nil {

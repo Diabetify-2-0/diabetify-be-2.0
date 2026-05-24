@@ -10,10 +10,11 @@ import (
 
 // RegisterExpertRoutes registers MLOps proxy routes for Medical Experts.
 // All routes require authentication and the MEDICAL_EXPERT (or ADMIN) role.
-func RegisterExpertRoutes(router *gin.Engine, userRepo repository.UserRepository) {
+func RegisterExpertRoutes(router *gin.Engine, userRepo repository.UserRepository, auditMiddleware gin.HandlerFunc) {
 	expert := router.Group("/expert")
 	expert.Use(middleware.AuthMiddleware())
 	expert.Use(middleware.RoleMiddleware("MEDICAL_EXPERT", "ADMIN"))
+	expert.Use(auditMiddleware)
 	{
 		// Browse model versions
 		expert.GET("/models", controllers.MLOpsProxy("/models", userRepo))
