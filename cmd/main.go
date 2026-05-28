@@ -69,6 +69,7 @@ func main() {
 		predictionRepo        repository.PredictionRepository
 		predictionJobRepo     repository.PredictionJobRepository
 		counterfactualJobRepo repository.CounterfactualJobRepository
+		plannerRepo           repository.PlannerRepository
 		auditLogRepo          repository.AuditLogRepository
 	)
 
@@ -83,6 +84,7 @@ func main() {
 		predictionRepo = repository.NewShardedPredictionRepository()
 		predictionJobRepo = repository.NewShardedPredictionJobRepository()
 		counterfactualJobRepo = repository.NewCounterfactualJobRepository(nil)
+		plannerRepo = repository.NewShardedPlannerRepository()
 		auditLogRepo = repository.NewAuditLogRepository(database.DB)
 		log.Println("Initialized sharded repositories")
 	} else {
@@ -96,6 +98,7 @@ func main() {
 		predictionRepo = repository.NewPredictionRepository(database.DB)
 		predictionJobRepo = repository.NewPredictionJobRepository(database.DB)
 		counterfactualJobRepo = repository.NewCounterfactualJobRepository(database.DB)
+		plannerRepo = repository.NewPlannerRepository(database.DB)
 		auditLogRepo = repository.NewAuditLogRepository(database.DB)
 		log.Println("Initialized single database repositories")
 	}
@@ -163,6 +166,7 @@ func main() {
 	activityService := services.NewActivityService(activityRepo)
 	articleService := services.NewArticleService(articleRepo)
 	oauthService := services.NewOAuthService(userRepo)
+	plannerService := services.NewPlannerService(plannerRepo)
 
 	// Initialize controllers
 	userController := controllers.NewUserController(userService)
@@ -171,6 +175,7 @@ func main() {
 	activityController := controllers.NewActivityController(activityService)
 	articleController := controllers.NewArticleController(articleService)
 	profileController := controllers.NewUserProfileController(profileService)
+	plannerController := controllers.NewPlannerController(plannerService)
 
 	// UNIFIED Prediction Controller (handles both sync and async via job worker)
 	predictionController := controllers.NewPredictionController(
@@ -237,6 +242,7 @@ func main() {
 	routes.RegisterUserProfileRoutes(router, profileController)
 	routes.RegisterPredictionRoutes(router, predictionController)
 	routes.RegisterCounterfactualRoutes(router, counterfactualController)
+	routes.RegisterPlannerRoutes(router, plannerController)
 	routes.RegisterDataRoutes(router, userRepo, auditMiddleware)
 	routes.RegisterExpertRoutes(router, userRepo, auditMiddleware)
 	routes.RegisterAuditLogRoutes(router, auditLogController)

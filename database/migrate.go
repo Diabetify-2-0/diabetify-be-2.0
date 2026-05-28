@@ -21,6 +21,8 @@ func MigrateDatabase() error {
 		&models.Prediction{},
 		&models.PredictionJob{},
 		&models.CounterfactualJob{},
+		&models.PlannerGoal{},
+		&models.PlannerCheckInEntry{},
 		&models.AuditLog{},
 	)
 
@@ -60,6 +62,8 @@ func migrateOnShard(db *gorm.DB) error {
 		&models.Prediction{},
 		&models.PredictionJob{},
 		&models.CounterfactualJob{},
+		&models.PlannerGoal{},
+		&models.PlannerCheckInEntry{},
 		&models.AuditLog{},
 	)
 

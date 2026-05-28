@@ -1008,7 +1008,7 @@ func (w *predictionJobWorker) calculateSmokingStatus(userID uint) (int, error) {
 	}
 	if profile.AgeOfSmoking != nil && *profile.AgeOfSmoking != 0 &&
 		profile.AgeOfStopSmoking != nil && *profile.AgeOfStopSmoking != 0 &&
-		currentAge > *profile.AgeOfStopSmoking {
+		currentAge >= *profile.AgeOfStopSmoking {
 		return 1, nil
 	}
 	return 0, nil
