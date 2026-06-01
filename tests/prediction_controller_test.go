@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -232,140 +231,6 @@ func TestMakePredictionUnauthorized(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "Unauthorized access", response["message"])
-}
-
-func TestWhatIfPrediction(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         uint
-		requestBody    map[string]interface{}
-		setupMocks     func(*mocks.MockPredictionRepository, *mocks.MockUserRepository, *mocks.MockUserProfileRepository, *mocks.MockActivityRepository, *mocks.MockPredictionJobRepository, *mocks.MockPredictionJobWorker, *mocks.MockMLClient)
-		expectedStatus int
-		expectedMsg    string
-	}{
-		{
-			name:   "successful what-if prediction",
-			userID: 1,
-			requestBody: map[string]interface{}{
-				"smoking_status":              1,
-				"avg_smoke_count":             5,
-				"weight":                      70.0,
-				"is_hypertension":             false,
-				"physical_activity_frequency": 3,
-				"is_cholesterol":              false,
-			},
-			setupMocks: func(predRepo *mocks.MockPredictionRepository, userRepo *mocks.MockUserRepository, profileRepo *mocks.MockUserProfileRepository, activityRepo *mocks.MockActivityRepository, jobRepo *mocks.MockPredictionJobRepository, jobWorker *mocks.MockPredictionJobWorker, mlClient *mocks.MockMLClient) {
-				// Mock user data with DOB
-				dob := "2000-01-01"
-				user := &models.User{
-					ID:  1,
-					DOB: &dob,
-				}
-				userRepo.On("GetUserByID", uint(1)).Return(user, nil)
-
-				// Mock profile data with ALL required fields for validation
-				bmi := 25.0
-				hypertension := false
-				cholesterol := false
-				macrosomicBaby := 0
-				bloodline := false
-				height := 175
-				profile := &models.UserProfile{
-					BMI:            &bmi,            // Required
-					Hypertension:   &hypertension,   // Required
-					Cholesterol:    &cholesterol,    // Required
-					MacrosomicBaby: &macrosomicBaby, // Required
-					Bloodline:      &bloodline,      // Required
-					Height:         &height,         // Additional field
-				}
-				profileRepo.On("FindByUserID", uint(1)).Return(profile, nil)
-
-				// Mock job creation and submission - SUCCESS
-				jobRepo.On("SaveJob", mock.AnythingOfType("*models.PredictionJob")).Return(nil)
-				jobWorker.On("SubmitJob", mock.AnythingOfType("models.PredictionJobRequest")).Return(nil)
-			},
-			expectedStatus: http.StatusAccepted,
-			expectedMsg:    "What-if prediction job submitted successfully",
-		},
-		{
-			name:   "invalid input format",
-			userID: 1,
-			requestBody: map[string]interface{}{
-				"smoking_status": "invalid",
-			},
-			setupMocks: func(predRepo *mocks.MockPredictionRepository, userRepo *mocks.MockUserRepository, profileRepo *mocks.MockUserProfileRepository, activityRepo *mocks.MockActivityRepository, jobRepo *mocks.MockPredictionJobRepository, jobWorker *mocks.MockPredictionJobWorker, mlClient *mocks.MockMLClient) {
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "Invalid input format",
-		},
-		{
-			name:   "incomplete profile - missing required fields",
-			userID: 1,
-			requestBody: map[string]interface{}{
-				"smoking_status":              1,
-				"avg_smoke_count":             5,
-				"weight":                      70.0,
-				"is_hypertension":             false,
-				"physical_activity_frequency": 3,
-				"is_cholesterol":              false,
-			},
-			setupMocks: func(predRepo *mocks.MockPredictionRepository, userRepo *mocks.MockUserRepository, profileRepo *mocks.MockUserProfileRepository, activityRepo *mocks.MockActivityRepository, jobRepo *mocks.MockPredictionJobRepository, jobWorker *mocks.MockPredictionJobWorker, mlClient *mocks.MockMLClient) {
-				dob := "2000-01-01"
-				user := &models.User{
-					ID:  1,
-					DOB: &dob,
-				}
-				userRepo.On("GetUserByID", uint(1)).Return(user, nil)
-
-				// Profile missing required BMI field
-				macrosomicBaby := 0
-				bloodline := false
-				height := 175
-				profile := &models.UserProfile{
-					BMI:            nil, // Missing required field
-					MacrosomicBaby: &macrosomicBaby,
-					Bloodline:      &bloodline,
-					Height:         &height,
-				}
-				profileRepo.On("FindByUserID", uint(1)).Return(profile, nil)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "Incomplete user profile",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			controller, predRepo, userRepo, profileRepo, activityRepo, jobRepo, jobWorker, mlClient := setupPredictionControllerWithMocks()
-			tt.setupMocks(predRepo, userRepo, profileRepo, activityRepo, jobRepo, jobWorker, mlClient)
-
-			router := setupPredictionTestRouter()
-			router.Use(addPredictionAuthMiddleware(tt.userID))
-			router.POST("/prediction/what-if", controller.WhatIfPrediction)
-
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("POST", "/prediction/what-if", bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
-			assert.Equal(t, tt.expectedStatus, w.Code)
-
-			var response map[string]interface{}
-			err := json.Unmarshal(w.Body.Bytes(), &response)
-			assert.NoError(t, err)
-			assert.Contains(t, response["message"], tt.expectedMsg)
-
-			predRepo.AssertExpectations(t)
-			userRepo.AssertExpectations(t)
-			profileRepo.AssertExpectations(t)
-			activityRepo.AssertExpectations(t)
-			jobRepo.AssertExpectations(t)
-			jobWorker.AssertExpectations(t)
-			mlClient.AssertExpectations(t)
-		})
-	}
 }
 
 func TestTestMLConnection(t *testing.T) {
@@ -1109,29 +974,6 @@ func TestGetJobResult(t *testing.T) {
 		expectedMsg    string
 	}{
 		{
-			name:   "successful what-if result retrieval",
-			jobID:  "test-job-id",
-			userID: 1,
-			setupMock: func(jobRepo *mocks.MockPredictionJobRepository, jobWorker *mocks.MockPredictionJobWorker, predRepo *mocks.MockPredictionRepository) {
-				job := &models.PredictionJob{
-					ID:       "test-job-id",
-					UserID:   1,
-					Status:   models.JobStatusCompleted,
-					IsWhatIf: true,
-				}
-				jobRepo.On("GetJobByID", "test-job-id").Return(job, nil)
-
-				result := map[string]interface{}{
-					"risk_score":      0.15,
-					"risk_percentage": 15.0,
-					"timestamp":       time.Now(),
-				}
-				jobWorker.On("GetWhatIfResult", "test-job-id").Return(result, true, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectedMsg:    "What-if prediction result retrieved successfully",
-		},
-		{
 			name:   "successful regular prediction result retrieval",
 			jobID:  "test-job-id",
 			userID: 1,
@@ -1141,7 +983,6 @@ func TestGetJobResult(t *testing.T) {
 					ID:           "test-job-id",
 					UserID:       1,
 					Status:       models.JobStatusCompleted,
-					IsWhatIf:     false,
 					PredictionID: &predictionID,
 				}
 				jobRepo.On("GetJobByID", "test-job-id").Return(job, nil)
@@ -1165,23 +1006,6 @@ func TestGetJobResult(t *testing.T) {
 			},
 			expectedStatus: http.StatusNotFound,
 			expectedMsg:    "Job not found",
-		},
-		{
-			name:   "what-if result not found in cache",
-			jobID:  "test-job-id",
-			userID: 1,
-			setupMock: func(jobRepo *mocks.MockPredictionJobRepository, jobWorker *mocks.MockPredictionJobWorker, predRepo *mocks.MockPredictionRepository) {
-				job := &models.PredictionJob{
-					ID:       "test-job-id",
-					UserID:   1,
-					Status:   models.JobStatusCompleted,
-					IsWhatIf: true,
-				}
-				jobRepo.On("GetJobByID", "test-job-id").Return(job, nil)
-				jobWorker.On("GetWhatIfResult", "test-job-id").Return(map[string]interface{}{}, false, nil)
-			},
-			expectedStatus: http.StatusNotFound,
-			expectedMsg:    "What-if result has expired or not found",
 		},
 		{
 			name:   "job not completed yet",

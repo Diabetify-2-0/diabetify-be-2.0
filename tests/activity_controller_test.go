@@ -177,7 +177,7 @@ func TestGetCurrentUserActivities(t *testing.T) {
 			limit:  "5",
 			setupMock: func(m *mocks.MockActivityService) {
 				activities := []models.Activity{
-					{ID: 1, ActivityType: "smoke", UserID: 1, Value: 1},
+					{ID: 1, ActivityType: "workout", UserID: 1, Value: 1},
 					{ID: 2, ActivityType: "workout", UserID: 1, Value: 30},
 				}
 				m.On("GetCurrentUserActivities", uint(1), 5).Return(activities, nil)
@@ -503,7 +503,7 @@ func TestGetActivitiesByDateRange(t *testing.T) {
 			endDate:   "2024-01-31",
 			setupMock: func(m *mocks.MockActivityService) {
 				activities := []models.Activity{
-					{ID: 1, ActivityType: "smoke", UserID: 1, Value: 1},
+					{ID: 1, ActivityType: "workout", UserID: 1, Value: 1},
 					{ID: 2, ActivityType: "workout", UserID: 1, Value: 30},
 				}
 				startTime, _ := time.Parse("2006-01-02", "2024-01-01")

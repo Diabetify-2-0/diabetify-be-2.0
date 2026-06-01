@@ -10,9 +10,7 @@ import (
 type PlannerService interface {
 	SaveGoal(goal *models.PlannerGoal) error
 	GetLatestGoal(userID uint) (*models.PlannerGoal, error)
-	GetGoalHistory(userID uint, limit int) ([]models.PlannerGoal, error)
-	CompleteGoal(userID uint, goalID string) (*models.PlannerGoal, error)
-	ArchiveGoal(userID uint, goalID string) (*models.PlannerGoal, error)
+	DeleteGoal(userID uint, goalID string) error
 	RecordCheckIn(entry *models.PlannerCheckInEntry) error
 	GetCheckInHistory(userID uint, goalID string, limit int) ([]models.PlannerCheckInEntry, error)
 	GetLastCheckIns(userID uint, goalID string) (map[string]int64, error)
@@ -41,16 +39,8 @@ func (s *plannerService) GetLatestGoal(userID uint) (*models.PlannerGoal, error)
 	return goal, err
 }
 
-func (s *plannerService) GetGoalHistory(userID uint, limit int) ([]models.PlannerGoal, error) {
-	return s.repo.FindGoalsByUserID(userID, limit)
-}
-
-func (s *plannerService) CompleteGoal(userID uint, goalID string) (*models.PlannerGoal, error) {
-	return s.repo.UpdateGoalStatus(userID, goalID, models.PlannerGoalStatusCompleted)
-}
-
-func (s *plannerService) ArchiveGoal(userID uint, goalID string) (*models.PlannerGoal, error) {
-	return s.repo.UpdateGoalStatus(userID, goalID, models.PlannerGoalStatusArchived)
+func (s *plannerService) DeleteGoal(userID uint, goalID string) error {
+	return s.repo.DeleteGoal(userID, goalID)
 }
 
 func (s *plannerService) RecordCheckIn(entry *models.PlannerCheckInEntry) error {

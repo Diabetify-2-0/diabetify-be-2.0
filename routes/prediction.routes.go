@@ -13,7 +13,6 @@ func RegisterPredictionRoutes(router *gin.Engine, predictionController *controll
 	predictionRoutes.Use(middleware.AuthMiddleware())
 	{
 		predictionRoutes.POST("/", predictionController.MakePrediction)
-		predictionRoutes.POST("/what-if", predictionController.WhatIfPrediction)
 
 		predictionRoutes.GET("/job/:job_id/status", predictionController.GetJobStatus)
 		predictionRoutes.GET("/job/:job_id/result", predictionController.GetJobResult)

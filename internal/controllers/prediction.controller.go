@@ -154,7 +154,6 @@ func (pc *PredictionController) MakePrediction(c *gin.Context) {
 		ID:        jobID,
 		UserID:    userID.(uint),
 		Status:    models.JobStatusPending,
-		IsWhatIf:  false,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -169,9 +168,8 @@ func (pc *PredictionController) MakePrediction(c *gin.Context) {
 	}
 
 	jobRequest := models.PredictionJobRequest{
-		JobID:       jobID,
-		UserID:      userID.(uint),
-		WhatIfInput: nil, // Regular prediction
+		JobID:  jobID,
+		UserID: userID.(uint),
 	}
 
 	if err := pc.jobWorker.SubmitJob(jobRequest); err != nil {
@@ -195,103 +193,6 @@ func (pc *PredictionController) MakePrediction(c *gin.Context) {
 			"status":      models.JobStatusPending,
 			"submit_time": time.Now(),
 			"poll_url":    fmt.Sprintf("/prediction/job/%s/status", jobID),
-		},
-	})
-}
-
-// WhatIfPrediction godoc
-// @Summary Make an asynchronous what-if prediction
-// @Description Submit a what-if prediction job using custom parameters via RabbitMQ
-// @Tags prediction
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param input body models.WhatIfInput true "What-if prediction parameters"
-// @Success 202 {object} map[string]interface{} "What-if prediction job submitted"
-// @Failure 400 {object} map[string]interface{} "Invalid input or incomplete profile"
-// @Failure 401 {object} map[string]interface{} "Unauthorized"
-// @Failure 500 {object} map[string]interface{} "Failed to submit job"
-// @Router /prediction/what-if [post]
-func (pc *PredictionController) WhatIfPrediction(c *gin.Context) {
-	var input models.WhatIfInput
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"status":  "error",
-			"message": "Unauthorized access",
-		})
-		return
-	}
-
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Invalid input format",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	// Validate user profile exists (basic data needed for what-if)
-	if err := pc.validateUserProfile(userID.(uint)); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Incomplete user profile",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	// Generate job ID
-	jobID := uuid.New().String()
-
-	// Create job record in database
-	job := &models.PredictionJob{
-		ID:        jobID,
-		UserID:    userID.(uint),
-		Status:    models.JobStatusPending,
-		IsWhatIf:  true,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	if err := pc.jobRepo.SaveJob(job); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to create what-if prediction job",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	jobRequest := models.PredictionJobRequest{
-		JobID:       jobID,
-		UserID:      userID.(uint),
-		WhatIfInput: &input, // What-if prediction with custom parameters
-	}
-
-	if err := pc.jobWorker.SubmitJob(jobRequest); err != nil {
-		// Update job status to failed
-		errMsg := fmt.Sprintf("Failed to submit job: %v", err)
-		pc.jobRepo.UpdateJobStatus(jobID, models.JobStatusFailed, &errMsg)
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to submit what-if prediction job",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusAccepted, gin.H{
-		"status":  "success",
-		"message": "What-if prediction job submitted successfully",
-		"data": gin.H{
-			"job_id":      jobID,
-			"status":      models.JobStatusPending,
-			"submit_time": time.Now(),
-			"poll_url":    fmt.Sprintf("/prediction/job/%s/status", jobID),
-			"input_used":  input,
 		},
 	})
 }
@@ -453,43 +354,7 @@ func (pc *PredictionController) GetJobResult(c *gin.Context) {
 		})
 		return
 	}
-	if job.IsWhatIf {
-		whatIfResult, exists, err := pc.jobWorker.GetWhatIfResult(jobID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "Failed to retrieve what-if result",
-				"error":   err.Error(),
-			})
-			return
-		}
 
-		if !exists {
-			c.JSON(http.StatusNotFound, gin.H{
-				"status":  "error",
-				"message": "What-if result has expired or not found",
-				"help":    "What-if results are only available for 1 hours after completion",
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "success",
-			"message": "What-if prediction result retrieved successfully",
-			"data":    whatIfResult,
-		})
-		return
-
-	} else {
-		// ===== REGULAR PREDICTION FROM DATABASE =====
-		if job.PredictionID == nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"status":  "error",
-				"message": "Job completed but no result found",
-			})
-			return
-		}
-	}
 	// Check if result exists
 	if job.PredictionID == nil {
 		c.JSON(http.StatusNotFound, gin.H{

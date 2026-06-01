@@ -14,6 +14,10 @@ type ActivityController struct {
 	service services.ActivityService
 }
 
+func isSupportedActivityType(activityType string) bool {
+	return activityType == "workout"
+}
+
 func NewActivityController(service services.ActivityService) *ActivityController {
 	return &ActivityController{service: service}
 }
@@ -59,6 +63,14 @@ func (ac *ActivityController) CreateActivity(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
 			"message": "Activity type is required",
+		})
+		return
+	}
+	if !isSupportedActivityType(activity.ActivityType) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Unsupported activity type",
+			"error":   "Only workout activity is supported",
 		})
 		return
 	}
@@ -108,15 +120,12 @@ func (ac *ActivityController) GetCurrentUserActivities(c *gin.Context) {
 	}
 
 	activities, err := ac.service.GetCurrentUserActivities(userID.(uint), limit)
-	// separate activity by type ["smoke", "workout"]
 	groupedActivities := make(map[string]interface{})
-
-	groupedActivities["smoke"] = []interface{}{}
 	groupedActivities["workout"] = []interface{}{}
 
 	for _, activity := range activities {
 		activityType := activity.ActivityType
-		if activityType == "smoke" || activityType == "workout" {
+		if activityType == "workout" {
 			groupedActivities[activityType] = append(groupedActivities[activityType].([]interface{}), activity)
 		}
 	}
@@ -262,6 +271,14 @@ func (ac *ActivityController) UpdateActivity(c *gin.Context) {
 	}
 
 	activity.UserID = existingActivity.UserID
+	if !isSupportedActivityType(activity.ActivityType) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Unsupported activity type",
+			"error":   "Only workout activity is supported",
+		})
+		return
+	}
 
 	if err := ac.service.UpdateActivity(&activity); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -409,13 +426,12 @@ func (ac *ActivityController) GetActivitiesByDateRange(c *gin.Context) {
 
 	groupedActivities := make(map[string]interface{})
 
-	groupedActivities["smoke"] = []interface{}{}
 	groupedActivities["workout"] = []interface{}{}
 
 	for _, activity := range activities {
 		activityType := activity.ActivityType
 
-		if activityType == "smoke" || activityType == "workout" {
+		if activityType == "workout" {
 			groupedActivities[activityType] = append(groupedActivities[activityType].([]interface{}), activity)
 		}
 	}
