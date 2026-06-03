@@ -107,6 +107,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       diabetify-db:
         condition: service_healthy
