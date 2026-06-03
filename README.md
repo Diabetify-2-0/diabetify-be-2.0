@@ -8,7 +8,7 @@ Backend ini menjalankan API utama Diabetify dengan:
 
 - PostgreSQL sebagai database aplikasi.
 - RabbitMQ untuk job prediksi ML dan counterfactual.
-- Redis untuk penyimpanan sementara hasil what-if.
+- Redis untuk cache metadata operasional sementara.
 - JWT authentication dan role-based access untuk endpoint tertentu.
 - Swagger documentation.
 - Health endpoints untuk deployment.

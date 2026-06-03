@@ -12,8 +12,7 @@ type PlannerRepository interface {
 	SaveGoal(goal *models.PlannerGoal) error
 	FindGoalByID(id string) (*models.PlannerGoal, error)
 	FindLatestGoalByUserID(userID uint) (*models.PlannerGoal, error)
-	FindGoalsByUserID(userID uint, limit int) ([]models.PlannerGoal, error)
-	UpdateGoalStatus(userID uint, goalID string, status models.PlannerGoalStatus) (*models.PlannerGoal, error)
+	DeleteGoal(userID uint, goalID string) error
 	CreateCheckIn(entry *models.PlannerCheckInEntry) error
 	FindCheckInsByGoalID(userID uint, goalID string, limit int) ([]models.PlannerCheckInEntry, error)
 	FindLastCheckInsByGoalID(userID uint, goalID string) (map[string]int64, error)
@@ -39,13 +38,42 @@ func NewShardedPlannerRepository() PlannerRepository {
 }
 
 func (r *plannerRepository) SaveGoal(goal *models.PlannerGoal) error {
-	if r.useShards {
-		return database.Manager.ExecuteOnUserShard(int(goal.UserID), func(db *gorm.DB) error {
-			return db.Save(goal).Error
+	save := func(db *gorm.DB) error {
+		return db.Transaction(func(tx *gorm.DB) error {
+			var oldGoalIDs []string
+			oldActiveGoals := tx.Model(&models.PlannerGoal{}).Where(
+				"user_id = ? AND status = ? AND id <> ?",
+				goal.UserID,
+				models.PlannerGoalStatusActive,
+				goal.ID,
+			)
+			if err := oldActiveGoals.Pluck("id", &oldGoalIDs).Error; err != nil {
+				return err
+			}
+			if len(oldGoalIDs) > 0 {
+				if err := tx.Unscoped().
+					Where("user_id = ? AND goal_id IN ?", goal.UserID, oldGoalIDs).
+					Delete(&models.PlannerCheckInEntry{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Unscoped().
+					Where("user_id = ? AND id IN ?", goal.UserID, oldGoalIDs).
+					Delete(&models.PlannerGoal{}).Error; err != nil {
+					return err
+				}
+			}
+
+			return tx.Save(goal).Error
 		})
 	}
 
-	return r.db.Save(goal).Error
+	if r.useShards {
+		return database.Manager.ExecuteOnUserShard(int(goal.UserID), func(db *gorm.DB) error {
+			return save(db)
+		})
+	}
+
+	return save(r.db)
 }
 
 func (r *plannerRepository) FindGoalByID(id string) (*models.PlannerGoal, error) {
@@ -73,7 +101,7 @@ func (r *plannerRepository) FindGoalByID(id string) (*models.PlannerGoal, error)
 func (r *plannerRepository) FindLatestGoalByUserID(userID uint) (*models.PlannerGoal, error) {
 	var goal models.PlannerGoal
 	query := func(db *gorm.DB) error {
-		return db.Where("user_id = ? AND status <> ?", userID, models.PlannerGoalStatusArchived).
+		return db.Where("user_id = ? AND status = ?", userID, models.PlannerGoalStatusActive).
 			Order("created_at_millis DESC").
 			First(&goal).Error
 	}
@@ -91,40 +119,29 @@ func (r *plannerRepository) FindLatestGoalByUserID(userID uint) (*models.Planner
 	return &goal, nil
 }
 
-func (r *plannerRepository) FindGoalsByUserID(userID uint, limit int) ([]models.PlannerGoal, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-
-	var goals []models.PlannerGoal
-	query := func(db *gorm.DB) error {
-		return db.Where("user_id = ?", userID).
-			Order("created_at_millis DESC").
-			Limit(limit).
-			Find(&goals).Error
+func (r *plannerRepository) DeleteGoal(userID uint, goalID string) error {
+	deleteGoal := func(db *gorm.DB) error {
+		return db.Transaction(func(tx *gorm.DB) error {
+			result := tx.Unscoped().
+				Where("user_id = ? AND id = ?", userID, goalID).
+				Delete(&models.PlannerGoal{})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			return tx.Unscoped().
+				Where("user_id = ? AND goal_id = ?", userID, goalID).
+				Delete(&models.PlannerCheckInEntry{}).Error
+		})
 	}
 
 	if r.useShards {
-		return goals, database.Manager.ExecuteOnUserShard(int(userID), query)
+		return database.Manager.ExecuteOnUserShard(int(userID), deleteGoal)
 	}
 
-	return goals, query(r.db)
-}
-
-func (r *plannerRepository) UpdateGoalStatus(userID uint, goalID string, status models.PlannerGoalStatus) (*models.PlannerGoal, error) {
-	goal, err := r.FindGoalByID(goalID)
-	if err != nil {
-		return nil, err
-	}
-	if goal.UserID != userID {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	goal.Status = status
-	if err := r.SaveGoal(goal); err != nil {
-		return nil, err
-	}
-	return goal, nil
+	return deleteGoal(r.db)
 }
 
 func (r *plannerRepository) CreateCheckIn(entry *models.PlannerCheckInEntry) error {

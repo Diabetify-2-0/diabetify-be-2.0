@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -30,9 +29,6 @@ type PredictionJobWorker interface {
 
 	// Status and monitoring
 	GetStatus() map[string]interface{}
-
-	// What-if result handling
-	GetWhatIfResult(jobID string) (map[string]interface{}, bool, error)
 }
 
 // predictionJobWorker is the concrete implementation
@@ -306,14 +302,6 @@ func (w *predictionJobWorker) GetStatus() map[string]interface{} {
 	}
 }
 
-func (w *predictionJobWorker) GetWhatIfResult(jobID string) (map[string]interface{}, bool, error) {
-	if w.redisClient == nil {
-		return nil, false, fmt.Errorf("Redis client not available")
-	}
-
-	return w.redisClient.GetWhatIfResult(jobID)
-}
-
 // ========== PRIVATE IMPLEMENTATION METHODS ==========
 
 func (w *predictionJobWorker) setupRabbitMQResponseHandler() error {
@@ -402,25 +390,6 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	modelResponse := convertToModelsResponse(rabbitResponse)
 
-	if job.IsWhatIf {
-		featureInfo := w.extractFeatureInfoFromMLResponse(rabbitResponse, 0)
-		whatIfResult := map[string]interface{}{
-			"job_id":               jobID,
-			"job_type":             "what_if",
-			"risk_score":           modelResponse.Prediction,
-			"risk_percentage":      modelResponse.Prediction * 100,
-			"user_data_used":       featureInfo,
-			"feature_explanations": w.buildFeatureExplanations(modelResponse),
-			"timestamp":            time.Now(),
-			"processing_time":      time.Since(job.CreatedAt).String(),
-		}
-		if err := w.storeWhatIfResult(jobID, whatIfResult); err != nil {
-			fmt.Printf("Warning: Failed to store what-if result in Redis: %v\n", err)
-		}
-		_ = w.jobRepo.UpdateJobStatus(jobID, "completed", nil)
-		return
-	}
-
 	// ===== REGULAR PREDICTION - SAVE TO DATABASE =====
 	var avgSmokeCount int
 	var calcErr error
@@ -487,7 +456,7 @@ func (w *predictionJobWorker) processJobFireAndForget(jobRequest models.Predicti
 		return
 	}
 
-	features, _, err := w.calculateFeaturesFromProfile(user, profile, userID, jobRequest.WhatIfInput)
+	features, _, err := w.calculateFeaturesFromProfile(user, profile, userID)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to calculate features: %v", err)
 		_ = w.jobRepo.UpdateJobStatus(jobID, models.JobStatusFailed, &errMsg)
@@ -507,10 +476,7 @@ func (w *predictionJobWorker) processJobFireAndForget(jobRequest models.Predicti
 
 	_ = w.jobRepo.UpdateJobStatus(jobID, models.JobStatusSubmitted, nil)
 
-	// Shadow prediction: kirim ke challenger jika aktif (hanya untuk prediksi reguler, bukan what-if)
-	if jobRequest.WhatIfInput == nil {
-		go w.sendShadowPrediction(jobID, features)
-	}
+	go w.sendShadowPrediction(jobID, features)
 }
 
 func (w *predictionJobWorker) recoverPendingJobs() {
@@ -754,13 +720,6 @@ func (w *predictionJobWorker) createPredictionRecord(userID uint, response *mode
 	}
 }
 
-func (w *predictionJobWorker) storeWhatIfResult(jobID string, result map[string]interface{}) error {
-	if w.redisClient == nil {
-		return fmt.Errorf("Redis client not available")
-	}
-	return w.redisClient.StoreWhatIfResult(jobID, result, 1*time.Hour)
-}
-
 // ========== FEATURE CALCULATION METHODS ==========
 
 func (w *predictionJobWorker) getAverageUserSmokeCount(userID uint) (int, error) {
@@ -769,76 +728,14 @@ func (w *predictionJobWorker) getAverageUserSmokeCount(userID uint) (int, error)
 		return 0, fmt.Errorf("failed to get profile for user %d for smoke count: %v", userID, err)
 	}
 
-	// --- NEW LOGIC: Prioritize self-reported smoke count ---
 	if profile != nil && profile.SmokeCount != nil && *profile.SmokeCount > 0 {
 		return *profile.SmokeCount, nil
 	}
 
-	user, err := w.userRepo.GetUserByID(userID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get user %d for smoke count: %v", userID, err)
-	}
-	activities, err := w.activityRepo.GetActivitiesByUserIDAndType(userID, "smoke")
-	if err != nil {
-		return 0, fmt.Errorf("failed to get smoke activities for user %d: %v", userID, err)
-	}
-
-	if len(activities) == 0 {
-		return 0, nil
-	}
-
-	totalSmoked := 0
-	for _, activity := range activities {
-		totalSmoked += activity.Value
-	}
-
-	if user != nil && user.DOB != nil && profile != nil && profile.AgeOfSmoking != nil {
-		var dobTime time.Time
-		var parseErr error
-		dobTime, parseErr = time.Parse(time.RFC3339, *user.DOB)
-		if parseErr != nil {
-			dobTime, parseErr = time.Parse("2006-01-02", *user.DOB)
-		}
-		if parseErr == nil {
-			now := time.Now()
-			age := now.Year() - dobTime.Year()
-			if now.YearDay() < dobTime.YearDay() {
-				age--
-			}
-			ageOfStartSmoking := *profile.AgeOfSmoking
-			if age > ageOfStartSmoking {
-				startSmokingDate := dobTime.AddDate(ageOfStartSmoking, 0, 0)
-				durationDays := time.Since(startSmokingDate).Hours() / 24
-				if durationDays >= 1 {
-					average := float64(totalSmoked) / durationDays
-					return int(math.Ceil(average)), nil
-				}
-			}
-		}
-	}
-
-	if len(activities) == 1 {
-		return activities[0].Value, nil
-	}
-	firstDate := activities[0].ActivityDate
-	lastDate := activities[0].ActivityDate
-	for _, activity := range activities {
-		if activity.ActivityDate.Before(firstDate) {
-			firstDate = activity.ActivityDate
-		}
-		if activity.ActivityDate.After(lastDate) {
-			lastDate = activity.ActivityDate
-		}
-	}
-	durationDays := int(lastDate.Sub(firstDate).Hours()/24) + 1
-	if durationDays <= 0 {
-		durationDays = 1
-	}
-	average := float64(totalSmoked) / float64(durationDays)
-	return int(math.Ceil(average)), nil
+	return 0, nil
 }
 
-func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, profile *models.UserProfile, userID uint, input *models.WhatIfInput) ([]float64, map[string]interface{}, error) {
+func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, profile *models.UserProfile, userID uint) ([]float64, map[string]interface{}, error) {
 	if user.DOB == nil {
 		return nil, nil, fmt.Errorf("date of birth is required but not found")
 	}
@@ -877,57 +774,42 @@ func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, pr
 		physicalActivityFrequency int
 		isCholesterol             bool
 		brinkmanIndex             int
-		avgSmokeCount             int
+		finalAvgSmokeCount        int
 	)
 
-	if input == nil {
-		if profile.BMI == nil {
-			return nil, nil, fmt.Errorf("BMI is required but not found")
-		}
-		bmi = *profile.BMI
+	if profile.BMI == nil {
+		return nil, nil, fmt.Errorf("BMI is required but not found")
+	}
+	bmi = *profile.BMI
 
-		if profile.Hypertension == nil {
-			return nil, nil, fmt.Errorf("hypertension status is required but not found")
-		}
-		isHypertension = *profile.Hypertension
+	if profile.Hypertension == nil {
+		return nil, nil, fmt.Errorf("hypertension status is required but not found")
+	}
+	isHypertension = *profile.Hypertension
 
-		if profile.Cholesterol == nil {
-			return nil, nil, fmt.Errorf("cholesterol status is required but not found")
-		}
-		isCholesterol = *profile.Cholesterol
+	if profile.Cholesterol == nil {
+		return nil, nil, fmt.Errorf("cholesterol status is required but not found")
+	}
+	isCholesterol = *profile.Cholesterol
 
-		smokingStatus, err = w.calculateSmokingStatus(userID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate smoking status: %v", err)
-		}
+	smokingStatus, err = w.calculateSmokingStatus(userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to calculate smoking status: %v", err)
+	}
 
-		physicalActivityFrequency, err = w.calculatePhysicalActivityFrequency(userID, profile)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate physical activity: %v", err)
-		}
+	physicalActivityFrequency, err = w.calculatePhysicalActivityFrequency(userID, profile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to calculate physical activity: %v", err)
+	}
 
-		avgSmokeCount, err = w.getAverageUserSmokeCount(userID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate average smoke count: %v", err)
-		}
+	finalAvgSmokeCount, err = w.getAverageUserSmokeCount(userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to calculate average smoke count: %v", err)
+	}
 
-		brinkmanIndex, err = w.calculateBrinkmanIndex(user, profile, avgSmokeCount)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate Brinkman index: %v", err)
-		}
-
-	} else {
-		smokingStatus = input.SmokingStatus
-		bmi = float64(input.Weight) / math.Pow(float64(*profile.Height)/100, 2)
-		isHypertension = input.IsHypertension
-		physicalActivityFrequency = input.PhysicalActivityFrequency
-		isCholesterol = input.IsCholesterol
-		avgSmokeCount = input.AvgSmokeCount
-
-		brinkmanIndex, err = w.calculateBrinkmanIndex(user, profile, input.AvgSmokeCount)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate Brinkman index: %v", err)
-		}
+	brinkmanIndex, err = w.calculateBrinkmanIndex(user, profile, finalAvgSmokeCount)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to calculate Brinkman index: %v", err)
 	}
 
 	features := []float64{
@@ -952,7 +834,7 @@ func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, pr
 		"is_cholesterol":              isCholesterol,
 		"is_bloodline":                isBloodline,
 		"physical_activity_frequency": physicalActivityFrequency,
-		"avg_smoke_count":             avgSmokeCount,
+		"avg_smoke_count":             finalAvgSmokeCount,
 	}
 
 	return features, featureInfo, nil
@@ -990,20 +872,10 @@ func (w *predictionJobWorker) calculateSmokingStatus(userID uint) (int, error) {
 		return 0, fmt.Errorf("user DOB is required for age calculation")
 	}
 
-	endDate := time.Now()
-	startDate := endDate.AddDate(0, 0, -56)
-	recentActivities, err := w.activityRepo.GetActivitiesByUserIDAndTypeAndDateRange(userID, "smoke", startDate, endDate)
-	if err != nil {
-		return 0, err
-	}
-
-	if (profile.AgeOfSmoking == nil || *profile.AgeOfSmoking == 0) && len(recentActivities) == 0 {
+	if profile.AgeOfSmoking == nil || *profile.AgeOfSmoking == 0 {
 		return 0, nil
 	}
 	if profile.AgeOfSmoking != nil && *profile.AgeOfSmoking != 0 && (profile.AgeOfStopSmoking == nil || *profile.AgeOfStopSmoking == 0) {
-		return 2, nil
-	}
-	if len(recentActivities) > 0 {
 		return 2, nil
 	}
 	if profile.AgeOfSmoking != nil && *profile.AgeOfSmoking != 0 &&

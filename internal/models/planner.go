@@ -9,9 +9,7 @@ import (
 type PlannerGoalStatus string
 
 const (
-	PlannerGoalStatusActive    PlannerGoalStatus = "ACTIVE"
-	PlannerGoalStatusCompleted PlannerGoalStatus = "COMPLETED"
-	PlannerGoalStatusArchived  PlannerGoalStatus = "ARCHIVED"
+	PlannerGoalStatusActive PlannerGoalStatus = "ACTIVE"
 )
 
 type PlannerGoalFeature struct {

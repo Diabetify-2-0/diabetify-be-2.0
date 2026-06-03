@@ -23,7 +23,7 @@ package "Sistem Diabetify 1.0" {
 
   queue "RabbitMQ\n[Message Broker]\nMeneruskan job prediksi async" as MQ
 
-  collections "Redis Cache\n[Cache]\nMenyimpan hasil what-if sementara" as Redis
+  collections "Redis Cache\n[Cache]\nMenyimpan cache operasional sementara" as Redis
 }
 
 cloud "Google OAuth\n[External System]" as Google
@@ -38,7 +38,7 @@ Backend --> SMTP : Mengirim email verifikasi\n dan reset password
 Backend --> Google : Memverifikasi token autentikasi Google
 Backend --> OpenAI : Menghasilkan penjelasan\nhasil prediksi
 Backend --> MQ : Mempublikasikan job prediksi
-Backend --> Redis : Menyimpan / membaca\nhasil what-if sementara
+Backend --> Redis : Menyimpan / membaca\ncache operasional sementara
 
 
 MQ --> ML : Meneruskan request prediksi

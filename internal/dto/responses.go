@@ -93,7 +93,6 @@ type PredictionJobResponse struct {
 	ID           string     `json:"id"`
 	UserID       uint       `json:"user_id"`
 	Status       string     `json:"status"`
-	IsWhatIf     bool       `json:"is_what_if"`
 	PredictionID *uint      `json:"prediction_id,omitempty"`
 	ErrorMessage *string    `json:"error_message,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -110,7 +109,6 @@ func NewPredictionJobResponse(job *models.PredictionJob) PredictionJobResponse {
 		ID:           job.ID,
 		UserID:       job.UserID,
 		Status:       job.Status,
-		IsWhatIf:     job.IsWhatIf,
 		PredictionID: job.PredictionID,
 		ErrorMessage: job.ErrorMessage,
 		CreatedAt:    job.CreatedAt,

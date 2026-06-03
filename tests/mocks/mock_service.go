@@ -131,11 +131,6 @@ func (m *MockPredictionJobWorker) SubmitJob(jobRequest models.PredictionJobReque
 	return args.Error(0)
 }
 
-func (m *MockPredictionJobWorker) GetWhatIfResult(jobID string) (map[string]interface{}, bool, error) {
-	args := m.Called(jobID)
-	return args.Get(0).(map[string]interface{}), args.Bool(1), args.Error(2)
-}
-
 func (m *MockPredictionJobWorker) GetStatus() map[string]interface{} {
 	args := m.Called()
 	return args.Get(0).(map[string]interface{})

@@ -81,42 +81,6 @@ func (pc *PlannerController) GetLatestGoal(c *gin.Context) {
 	})
 }
 
-func (pc *PlannerController) GetGoalHistory(c *gin.Context) {
-	userID, ok := authenticatedUserID(c)
-	if !ok {
-		return
-	}
-
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if err != nil || limit <= 0 {
-		limit = 20
-	}
-
-	goals, err := pc.service.GetGoalHistory(userID, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Failed to retrieve planner goals",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "Planner goals retrieved successfully",
-		"data":    goals,
-	})
-}
-
-func (pc *PlannerController) CompleteGoal(c *gin.Context) {
-	pc.updateGoalStatus(c, true)
-}
-
-func (pc *PlannerController) ArchiveGoal(c *gin.Context) {
-	pc.updateGoalStatus(c, false)
-}
-
 func (pc *PlannerController) RecordCheckIn(c *gin.Context) {
 	userID, ok := authenticatedUserID(c)
 	if !ok {
@@ -211,26 +175,16 @@ func (pc *PlannerController) GetLastCheckIns(c *gin.Context) {
 	})
 }
 
-func (pc *PlannerController) updateGoalStatus(c *gin.Context, completed bool) {
+func (pc *PlannerController) DeleteGoal(c *gin.Context) {
 	userID, ok := authenticatedUserID(c)
 	if !ok {
 		return
 	}
 
-	var (
-		goal *models.PlannerGoal
-		err  error
-	)
-	if completed {
-		goal, err = pc.service.CompleteGoal(userID, c.Param("id"))
-	} else {
-		goal, err = pc.service.ArchiveGoal(userID, c.Param("id"))
-	}
-
-	if err != nil {
+	if err := pc.service.DeleteGoal(userID, c.Param("id")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
-			"message": "Failed to update planner goal",
+			"message": "Failed to delete planner goal",
 			"error":   err.Error(),
 		})
 		return
@@ -238,8 +192,8 @@ func (pc *PlannerController) updateGoalStatus(c *gin.Context, completed bool) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"message": "Planner goal updated successfully",
-		"data":    goal,
+		"message": "Planner goal deleted successfully",
+		"data":    nil,
 	})
 }
 
