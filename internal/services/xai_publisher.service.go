@@ -147,14 +147,9 @@ func buildXaiPayload(userID uint, rabbitResponse *RabbitMQPredictionResponse) xa
 		return scored[i].weight > scored[j].weight
 	})
 
-	limit := 4
-	if len(scored) < limit {
-		limit = len(scored)
-	}
-
-	features := make([]xaiFeaturePayload, limit)
-	for i := 0; i < limit; i++ {
-		features[i] = scored[i].payload
+	features := make([]xaiFeaturePayload, len(scored))
+	for i, sf := range scored {
+		features[i] = sf.payload
 	}
 
 	return xaiResultsPayload{
