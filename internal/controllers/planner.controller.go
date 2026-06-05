@@ -40,6 +40,13 @@ func (pc *PlannerController) SaveGoal(c *gin.Context) {
 		})
 		return
 	}
+	if goal.DurationWeeks != 4 && goal.DurationWeeks != 8 && goal.DurationWeeks != 12 && goal.DurationWeeks != 24 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Planner goal duration must be one of: 4, 8, 12, or 24 weeks",
+		})
+		return
+	}
 
 	goal.UserID = userID
 	if err := pc.service.SaveGoal(&goal); err != nil {

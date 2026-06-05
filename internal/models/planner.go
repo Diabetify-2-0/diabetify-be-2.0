@@ -32,6 +32,7 @@ type PlannerGoal struct {
 	Status                  PlannerGoalStatus    `gorm:"type:varchar(24);index;not null;default:ACTIVE" json:"status"`
 	CurrentRiskPercentage   *float64             `json:"current_risk_percentage"`
 	TargetRiskPercentage    int                  `gorm:"not null" json:"target_risk_percentage"`
+	DurationWeeks           int                  `gorm:"not null;default:12" json:"duration_weeks"`
 	ProjectedRiskPercentage *float64             `json:"projected_risk_percentage"`
 	SourceJobID             *string              `gorm:"size:128;index" json:"source_job_id"`
 	CreatedAtMillis         int64                `gorm:"not null" json:"created_at_millis"`
