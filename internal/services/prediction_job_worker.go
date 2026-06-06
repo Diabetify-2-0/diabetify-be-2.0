@@ -152,11 +152,6 @@ func (w *predictionJobWorker) Start() {
 	w.wg.Add(1)
 	go w.cleanupRoutine()
 
-	// Start challenger polling (shadow deployment)
-	if w.redisClient != nil {
-		w.wg.Add(1)
-		go w.pollChallengerInfo()
-	}
 }
 
 func (w *predictionJobWorker) Stop() {
@@ -957,42 +952,6 @@ func (w *predictionJobWorker) boolToFloat(b bool) float64 {
 	return 0.0
 }
 
-func (w *predictionJobWorker) pollChallengerInfo() {
-	defer w.wg.Done()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	w.fetchAndCacheChallenger()
-
-	for {
-		select {
-		case <-ticker.C:
-			w.fetchAndCacheChallenger()
-		case <-w.stopChan:
-			return
-		}
-	}
-}
-
-func (w *predictionJobWorker) fetchAndCacheChallenger() {
-	resp, err := w.shadowClient.Get(fmt.Sprintf("%s/shadow/active", w.mlopsURL))
-	if err != nil {
-		fmt.Printf("Warning: failed to poll challenger info: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		var info cache.ChallengerInfo
-		if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-			fmt.Printf("Warning: failed to decode challenger info: %v\n", err)
-			return
-		}
-		_ = w.redisClient.SetActiveChallengerInfo(&info)
-	} else {
-		_ = w.redisClient.DeleteActiveChallengerInfo()
-	}
-}
 
 var featureColumnNames = []string{
 	"age", "smoking_status", "is_cholesterol", "is_macrosomic_baby",
