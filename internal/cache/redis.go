@@ -5,7 +5,6 @@ import (
 	"diabetify/internal/config"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -58,20 +57,11 @@ func (r *RedisClient) Close() error {
 }
 
 const activeChallengerKey = "shadow:active_challenger"
-const activeChallengerTTL = 60 * time.Second
 
 type ChallengerInfo struct {
 	DeploymentID int    `json:"deployment_id"`
 	ModelID      int    `json:"model_id"`
 	ModelVersion string `json:"model_version"`
-}
-
-func (r *RedisClient) SetActiveChallengerInfo(info *ChallengerInfo) error {
-	data, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("failed to marshal challenger info: %w", err)
-	}
-	return r.client.Set(r.ctx, activeChallengerKey, data, activeChallengerTTL).Err()
 }
 
 // GetActiveChallengerInfo returns nil, nil when no active challenger exists.
@@ -88,10 +78,6 @@ func (r *RedisClient) GetActiveChallengerInfo() (*ChallengerInfo, error) {
 		return nil, fmt.Errorf("failed to unmarshal challenger info: %w", err)
 	}
 	return &info, nil
-}
-
-func (r *RedisClient) DeleteActiveChallengerInfo() error {
-	return r.client.Del(r.ctx, activeChallengerKey).Err()
 }
 
 // Get Redis status

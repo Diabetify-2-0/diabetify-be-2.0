@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"bytes"
+	"encoding/json"
+
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
 
@@ -14,7 +17,6 @@ var pathAction = map[string]map[string]string{
 		"/data/datasets":                          "UPLOAD_DATASET",
 		"/data/datasets/:id/preprocess":           "PREPROCESS_DATASET",
 		"/data/training/trigger":                  "TRIGGER_TRAINING",
-		"/data/training/jobs/:id/cancel":          "CANCEL_TRAINING",
 		"/data/shadow/activate":                   "ACTIVATE_SHADOW",
 		"/data/shadow/deactivate/:deployment_id":  "DEACTIVATE_SHADOW",
 		"/data/drift/trigger":                     "TRIGGER_DRIFT",
@@ -33,12 +35,21 @@ var pathAction = map[string]map[string]string{
 	},
 }
 
+// bodyWriter wraps gin.ResponseWriter to capture response body for error logging.
+type bodyWriter struct {
+	gin.ResponseWriter
+	body *bytes.Buffer
+}
+
+func (w *bodyWriter) Write(b []byte) (int, error) {
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
+}
+
 func actionDetails(c *gin.Context, action string) string {
 	switch action {
 	case "PREPROCESS_DATASET":
 		return "dataset #" + c.Param("id")
-	case "CANCEL_TRAINING":
-		return "job #" + c.Param("id")
 	case "DEACTIVATE_SHADOW":
 		return "deployment #" + c.Param("deployment_id")
 	case "ACKNOWLEDGE_DRIFT":
@@ -52,36 +63,69 @@ func actionDetails(c *gin.Context, action string) string {
 	}
 }
 
+func extractErrorDetail(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var errBody struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &errBody); err == nil && errBody.Detail != "" {
+		if len(errBody.Detail) > 1000 {
+			return errBody.Detail[:1000]
+		}
+		return errBody.Detail
+	}
+	raw := string(body)
+	if len(raw) > 1000 {
+		raw = raw[:1000]
+	}
+	return raw
+}
+
 // AuditMiddleware logs every auditable mutating request after the handler runs.
 // It requires AuthMiddleware to have set "user_id" in context first.
 func AuditMiddleware(repo repository.AuditLogRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Only wrap body capture for auditable paths to avoid unnecessary buffering.
+		methods, isAuditable := pathAction[c.Request.Method]
+		var bw *bodyWriter
+		if isAuditable {
+			if _, found := methods[c.FullPath()]; found {
+				bw = &bodyWriter{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
+				c.Writer = bw
+			}
+		}
+
 		c.Next()
+
+		if bw == nil {
+			return
+		}
 
 		userID := c.GetUint("user_id")
 		if userID == 0 {
 			return
 		}
 
-		methods, ok := pathAction[c.Request.Method]
-		if !ok {
-			return
-		}
 		action, ok := methods[c.FullPath()]
 		if !ok {
 			return
 		}
 
 		status := "success"
-		if c.Writer.Status() >= 400 {
+		var errDetail string
+		if bw.Status() >= 400 {
 			status = "failed"
+			errDetail = extractErrorDetail(bw.body.Bytes())
 		}
 
 		log := &models.AuditLog{
-			UserID:  userID,
-			Action:  action,
-			Details: actionDetails(c, action),
-			Status:  status,
+			UserID:      userID,
+			Action:      action,
+			Details:     actionDetails(c, action),
+			Status:      status,
+			ErrorDetail: errDetail,
 		}
 		go func() { _ = repo.Create(log) }() //nolint:errcheck
 	}
