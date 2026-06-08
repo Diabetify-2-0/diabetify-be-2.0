@@ -166,7 +166,7 @@ func main() {
 	activityService := services.NewActivityService(activityRepo)
 	articleService := services.NewArticleService(articleRepo)
 	oauthService := services.NewOAuthService(userRepo)
-	plannerService := services.NewPlannerService(plannerRepo)
+	plannerService := services.NewPlannerService(plannerRepo, profileRepo, activityRepo)
 
 	// Initialize controllers
 	userController := controllers.NewUserController(userService)
