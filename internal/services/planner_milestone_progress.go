@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	plannerMilestoneTolerance = 0.05
-	plannerWeekMillis         = 7 * 24 * time.Hour
+	plannerWeekMillis = 7 * 24 * time.Hour
 )
 
 var plannerNumberPattern = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
@@ -116,11 +115,14 @@ func buildPlannerCoachMilestoneItem(
 	expectedValue := *baseline + ((*target - *baseline) * expectedFraction)
 	item.ExpectedText = plannerFormatFeatureValue(feature.FeatureName, &expectedValue, profileHeightCm(profile))
 	progressFraction := plannerCalculateProgressFraction(*baseline, *target, currentValue)
+	weeklyTargetReached := plannerHasReachedDisplayedNumericTarget(
+		feature.FeatureName,
+		baselineText,
+		currentText,
+		item.ExpectedText,
+	)
 	reached := plannerHasReachedDisplayedNumericTarget(feature.FeatureName, baselineText, currentText, targetText) ||
 		plannerIsTargetReached(feature.FeatureName, *baseline, *target, currentValue)
-	onTrack := reached ||
-		plannerHasReachedDisplayedNumericTarget(feature.FeatureName, baselineText, currentText, item.ExpectedText) ||
-		progressFraction+plannerMilestoneTolerance >= expectedFraction
 
 	resolvedFraction := progressFraction
 	if displayedFraction, ok := plannerDisplayedNumericProgressFraction(feature.FeatureName, baselineText, currentText, targetText); ok {
@@ -134,8 +136,8 @@ func buildPlannerCoachMilestoneItem(
 	case reached:
 		item.Status = "ACHIEVED"
 		item.ProgressFraction = 1
-	case onTrack:
-		item.Status = "ON_TRACK"
+	case weeklyTargetReached:
+		item.Status = "ACHIEVED"
 		item.ProgressFraction = resolvedFraction
 	default:
 		item.Status = "BEHIND"

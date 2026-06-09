@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func TestBuildPlannerCoachMilestoneProgressUsesActivityHistoryForPhysicalActivit
 		Status:               models.PlannerGoalStatusActive,
 		TargetRiskPercentage: 30,
 		DurationWeeks:        12,
-		CreatedAtMillis:      time.Now().UTC().AddDate(0, 0, -14).UnixMilli(),
+		CreatedAtMillis:      time.Now().UTC().AddDate(0, 0, -13).UnixMilli(),
 		Features: []models.PlannerGoalFeature{
 			{
 				FeatureName:   "moderate_physical_activity_frequency",
@@ -119,6 +120,80 @@ func TestBuildPlannerCoachMilestoneProgressUsesActivityHistoryForPhysicalActivit
 	}
 	if item.CurrentText != "3 hari/minggu" {
 		t.Fatalf("expected user-facing activity text, got %q", item.CurrentText)
+	}
+}
+
+func TestBuildPlannerCoachMilestoneProgressMarksNumericMilestoneBehindUntilWeeklyTargetReached(t *testing.T) {
+	baselineBMI := bmiFromWeightValue(83, 172)
+	targetBMI := bmiFromWeightValue(73, 172)
+	goal := &models.PlannerGoal{
+		ID:                   "goal-weekly-bmi",
+		UserID:               123,
+		Status:               models.PlannerGoalStatusActive,
+		TargetRiskPercentage: 30,
+		DurationWeeks:        4,
+		CreatedAtMillis:      time.Now().UTC().AddDate(0, 0, -14).UnixMilli(),
+		Features: []models.PlannerGoalFeature{
+			{
+				FeatureName:   "BMI",
+				Label:         "BMI",
+				BaselineValue: &baselineBMI,
+				TargetValue:   &targetBMI,
+				BaselineText:  "83 kg",
+				TargetText:    "73 kg",
+				ActionLabel:   "Turunkan berat secara bertahap",
+			},
+		},
+	}
+	service := &plannerService{}
+	scenarioNow := time.UnixMilli(goal.CreatedAtMillis).Add(8 * 24 * time.Hour)
+
+	cases := []struct {
+		weightKg       int
+		expectedStatus string
+		expectedText   string
+	}{
+		{weightKg: 82, expectedStatus: "BEHIND", expectedText: "82 kg"},
+		{weightKg: 81, expectedStatus: "BEHIND", expectedText: "81 kg"},
+		{weightKg: 80, expectedStatus: "BEHIND", expectedText: "80 kg"},
+		{weightKg: 79, expectedStatus: "BEHIND", expectedText: "79 kg"},
+		{weightKg: 78, expectedStatus: "ACHIEVED", expectedText: "78 kg"},
+		{weightKg: 77, expectedStatus: "ACHIEVED", expectedText: "77 kg"},
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%dkg", tc.weightKg), func(t *testing.T) {
+			profile := sampleUserProfile()
+			profile.Weight = intPtr(tc.weightKg)
+			profile.BMI = bmiFromWeight(tc.weightKg, 172)
+			checkIns := []models.PlannerCheckInEntry{
+				{
+					ID:              fmt.Sprintf("checkin-%d", tc.weightKg),
+					UserID:          123,
+					GoalID:          goal.ID,
+					Type:            "weight",
+					Label:           "Berat Mingguan",
+					ValueText:       fmt.Sprintf("%d kg", tc.weightKg),
+					CreatedAtMillis: scenarioNow.UnixMilli(),
+				},
+			}
+
+			progress := buildPlannerCoachMilestoneProgress(service, goal, checkIns, profile, scenarioNow)
+			if progress == nil || len(progress.Items) != 1 {
+				t.Fatalf("expected one milestone item, got %+v", progress)
+			}
+
+			item := progress.Items[0]
+			if item.ExpectedText != "78 kg" {
+				t.Fatalf("expected weekly target 78 kg, got %q", item.ExpectedText)
+			}
+			if item.CurrentText != tc.expectedText {
+				t.Fatalf("expected current text %q, got %q", tc.expectedText, item.CurrentText)
+			}
+			if item.Status != tc.expectedStatus {
+				t.Fatalf("expected status %s at %d kg, got %s", tc.expectedStatus, tc.weightKg, item.Status)
+			}
+		})
 	}
 }
 
@@ -174,6 +249,20 @@ func sampleUserProfile() *models.UserProfile {
 
 func intPtr(v int) *int {
 	return &v
+}
+
+func bmiFromWeight(weightKg int, heightCm int) *float64 {
+	heightMeters := float64(heightCm) / 100.0
+	if heightMeters <= 0 {
+		return nil
+	}
+	bmi := float64(weightKg) / (heightMeters * heightMeters)
+	return &bmi
+}
+
+func bmiFromWeightValue(weightKg int, heightCm int) float64 {
+	heightMeters := float64(heightCm) / 100.0
+	return float64(weightKg) / (heightMeters * heightMeters)
 }
 
 func sampleCheckIns() []models.PlannerCheckInEntry {
