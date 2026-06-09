@@ -368,6 +368,31 @@ func (m *MockPredictionJobRepository) IsJobOwnedByUser(jobID string, userID uint
 	return args.Bool(0), args.Error(1)
 }
 
+type MockAuditLogRepository struct {
+	mock.Mock
+}
+
+func (m *MockAuditLogRepository) Create(log *models.AuditLog) error {
+	args := m.Called(log)
+	return args.Error(0)
+}
+
+func (m *MockAuditLogRepository) List(offset, limit int) ([]*models.AuditLog, int64, error) {
+	args := m.Called(offset, limit)
+	if args.Get(0) == nil {
+		return nil, args.Get(1).(int64), args.Error(2)
+	}
+	return args.Get(0).([]*models.AuditLog), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockAuditLogRepository) GetByID(id uint) (*models.AuditLog, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.AuditLog), args.Error(1)
+}
+
 type MockCounterfactualJobRepository struct {
 	mock.Mock
 }

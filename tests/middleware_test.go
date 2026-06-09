@@ -1,10 +1,12 @@
-package middleware
+package tests
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"diabetify/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -25,7 +27,7 @@ func TestAuthMiddlewareAcceptsValidTokenAndSetsClaims(t *testing.T) {
 	assert.NoError(t, err)
 
 	router := gin.New()
-	router.Use(AuthMiddleware())
+	router.Use(middleware.AuthMiddleware())
 	router.GET("/protected", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"user_id": c.GetUint("user_id"),
@@ -51,7 +53,7 @@ func TestRoleMiddlewareRejectsInsufficientRole(t *testing.T) {
 		c.Set("role", "USER")
 		c.Next()
 	})
-	router.Use(RoleMiddleware("ADMIN"))
+	router.Use(middleware.RoleMiddleware("ADMIN"))
 	router.GET("/admin", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})

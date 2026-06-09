@@ -1,4 +1,4 @@
-package controllers
+package tests
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 
+	"diabetify/internal/controllers"
 	"diabetify/internal/models"
 	"diabetify/tests/mocks"
 
@@ -18,8 +19,8 @@ import (
 )
 
 func TestGoogleAuthCreatesUserAndReturnsToken(t *testing.T) {
-	originalVerifier := googleTokenVerifier
-	googleTokenVerifier = func(ctx context.Context, token string) (map[string]interface{}, error) {
+	originalVerifier := controllers.GoogleTokenVerifier
+	controllers.GoogleTokenVerifier = func(ctx context.Context, token string) (map[string]interface{}, error) {
 		return map[string]interface{}{
 			"email":          "new.google@example.com",
 			"name":           "Google User",
@@ -29,7 +30,7 @@ func TestGoogleAuthCreatesUserAndReturnsToken(t *testing.T) {
 		}, nil
 	}
 	defer func() {
-		googleTokenVerifier = originalVerifier
+		controllers.GoogleTokenVerifier = originalVerifier
 	}()
 
 	os.Setenv("JWT_SECRET_KEY", "test-secret-key")
@@ -47,7 +48,7 @@ func TestGoogleAuthCreatesUserAndReturnsToken(t *testing.T) {
 		Verified: true,
 	}, nil)
 
-	controller := NewOauthController(mockOAuthService)
+	controller := controllers.NewOauthController(mockOAuthService)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -72,8 +73,8 @@ func TestGoogleAuthCreatesUserAndReturnsToken(t *testing.T) {
 }
 
 func TestGoogleAuthRejectsUnexpectedAudience(t *testing.T) {
-	originalVerifier := googleTokenVerifier
-	googleTokenVerifier = func(ctx context.Context, token string) (map[string]interface{}, error) {
+	originalVerifier := controllers.GoogleTokenVerifier
+	controllers.GoogleTokenVerifier = func(ctx context.Context, token string) (map[string]interface{}, error) {
 		return map[string]interface{}{
 			"email":          "new.google@example.com",
 			"name":           "Google User",
@@ -83,7 +84,7 @@ func TestGoogleAuthRejectsUnexpectedAudience(t *testing.T) {
 		}, nil
 	}
 	defer func() {
-		googleTokenVerifier = originalVerifier
+		controllers.GoogleTokenVerifier = originalVerifier
 	}()
 
 	os.Setenv("JWT_SECRET_KEY", "test-secret-key")
@@ -92,7 +93,7 @@ func TestGoogleAuthRejectsUnexpectedAudience(t *testing.T) {
 	defer os.Unsetenv("GOOGLE_KEY")
 
 	mockOAuthService := new(mocks.MockOAuthService)
-	controller := NewOauthController(mockOAuthService)
+	controller := controllers.NewOauthController(mockOAuthService)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

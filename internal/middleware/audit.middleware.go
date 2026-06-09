@@ -35,7 +35,6 @@ var pathAction = map[string]map[string]string{
 	},
 }
 
-// bodyWriter wraps gin.ResponseWriter to capture response body for error logging.
 type bodyWriter struct {
 	gin.ResponseWriter
 	body *bytes.Buffer

@@ -1,12 +1,15 @@
-package services
+package tests
 
 import (
 	"crypto/sha256"
-	"diabetify/internal/models"
-	"diabetify/tests/mocks"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
+
+	"diabetify/internal/models"
+	"diabetify/internal/services"
+	"diabetify/tests/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -27,18 +30,26 @@ func createLegacySHA256PasswordHash(password string) string {
 }
 
 func TestHashPasswordUsesBcrypt(t *testing.T) {
-	service := &userService{}
+	mockUserRepo := new(mocks.MockUserRepository)
+	mockResetRepo := new(mocks.MockResetPasswordRepository)
+	service := services.NewUserService(mockUserRepo, mockResetRepo)
 
-	hash, err := service.hashPassword("password123")
+	mockUserRepo.On("GetUserByEmail", "test@example.com").Return(nil, errors.New("not found"))
+	mockUserRepo.On("CreateUser", mock.AnythingOfType("*models.User")).Return(nil)
+
+	user, err := service.CreateUser("test@example.com", "password123", "Test User", "USER", nil, nil)
+
 	assert.NoError(t, err)
-	assert.NotEmpty(t, hash)
-	assert.Contains(t, hash, "$2")
-	assert.True(t, service.VerifyPassword(hash, "password123"))
-	assert.False(t, service.VerifyPassword(hash, "wrong-password"))
+	assert.NotEmpty(t, user.Password)
+	assert.Contains(t, user.Password, "$2") // bcrypt prefix
+	assert.True(t, service.VerifyPassword(user.Password, "password123"))
+	assert.False(t, service.VerifyPassword(user.Password, "wrong-password"))
+
+	mockUserRepo.AssertExpectations(t)
 }
 
 func TestVerifyPasswordSupportsLegacySHA256Hashes(t *testing.T) {
-	service := &userService{}
+	service := services.NewUserService(nil, nil)
 	legacyHash := createLegacySHA256PasswordHash("password123")
 
 	assert.True(t, service.VerifyPassword(legacyHash, "password123"))
@@ -48,7 +59,7 @@ func TestVerifyPasswordSupportsLegacySHA256Hashes(t *testing.T) {
 func TestResetPasswordValidCodeHashesAndDeletesResetRecord(t *testing.T) {
 	userRepo := new(mocks.MockUserRepository)
 	resetRepo := new(mocks.MockResetPasswordRepository)
-	service := NewUserService(userRepo, resetRepo)
+	service := services.NewUserService(userRepo, resetRepo)
 
 	resetRepo.On("FindByEmailAndCode", "user@example.com", "123456").Return(&models.ResetPassword{
 		Email:     "user@example.com",

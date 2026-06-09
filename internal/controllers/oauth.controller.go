@@ -15,7 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var googleTokenVerifier = verifyGoogleToken
+var GoogleTokenVerifier = verifyGoogleToken
 
 var (
 	errGoogleTokenVerificationFailed = errors.New("token verification failed")
@@ -143,7 +143,7 @@ func (oc *OauthController) GoogleAuth(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	tokenInfo, err := googleTokenVerifier(ctx, authRequest.Token)
+	tokenInfo, err := GoogleTokenVerifier(ctx, authRequest.Token)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		if errors.Is(err, errGoogleTokenVerificationFailed) ||
