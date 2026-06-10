@@ -30,10 +30,6 @@ type fireAndForgetMLClient struct {
 
 	// Configuration
 	rabbitURL string
-
-	// Debug tracking
-	debugEnabled bool
-	messagesSent int64
 }
 
 // NewAsyncMLClient creates a RabbitMQ client for asynchronous ML requests.
@@ -48,8 +44,6 @@ func NewAsyncMLClient(rabbitURL, responseQueue string) (MLClient, error) {
 		responseQueue: responseQueue,
 		healthQueue:   "ml.health.request",
 		closed:        false,
-		debugEnabled:  true,
-		messagesSent:  0,
 	}
 
 	if err := client.initRabbitMQ(); err != nil {
@@ -146,7 +140,6 @@ func (c *fireAndForgetMLClient) PredictAsync(ctx context.Context, jobID string, 
 		return fmt.Errorf("failed to publish fire-and-forget request: %w", err)
 	}
 
-	c.messagesSent++
 	return nil
 }
 
