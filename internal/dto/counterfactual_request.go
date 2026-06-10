@@ -25,16 +25,10 @@ type CounterfactualInstance struct {
 }
 
 type CounterfactualRules struct {
-	ImmutableFeatures     []string                           `json:"immutable_features,omitempty"`
-	MutableAllowed        []string                           `json:"mutable_allowed,omitempty"`
-	FeatureBounds         map[string]CounterfactualFeatBound `json:"feature_bounds,omitempty"`
-	MustNotChange         []string                           `json:"must_not_change,omitempty"`
-	MedicalRuleSetVersion string                             `json:"medical_rule_set_version,omitempty"`
-}
-
-type CounterfactualFeatBound struct {
-	Min *float64 `json:"min,omitempty"`
-	Max *float64 `json:"max,omitempty"`
+	ImmutableFeatures     []string `json:"immutable_features,omitempty"`
+	MutableAllowed        []string `json:"mutable_allowed,omitempty"`
+	MustNotChange         []string `json:"must_not_change,omitempty"`
+	MedicalRuleSetVersion string   `json:"medical_rule_set_version,omitempty"`
 }
 
 type CounterfactualGenerate struct {
@@ -63,12 +57,6 @@ func (r *CounterfactualSubmitRequest) Validate() error {
 	if r.Target != nil {
 		if r.Target.MinTargetProbability < 0 || r.Target.MinTargetProbability > 1 {
 			return fmt.Errorf("target.min_target_probability must be between 0 and 1")
-		}
-	}
-
-	for feature, bounds := range r.Constraints.FeatureBounds {
-		if bounds.Min != nil && bounds.Max != nil && *bounds.Min > *bounds.Max {
-			return fmt.Errorf("feature_bounds.%s min cannot be greater than max", feature)
 		}
 	}
 
