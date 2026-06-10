@@ -13,6 +13,7 @@ func RegisterPlannerRoutes(router *gin.Engine, plannerController *controllers.Pl
 	{
 		plannerRoutes.POST("/goals", plannerController.SaveGoal)
 		plannerRoutes.GET("/goals/active", plannerController.GetLatestGoal)
+		plannerRoutes.GET("/goals/active/coach", plannerController.GetActiveCoach)
 		plannerRoutes.DELETE("/goals/:id", plannerController.DeleteGoal)
 		plannerRoutes.POST("/goals/:id/check-ins", plannerController.RecordCheckIn)
 		plannerRoutes.GET("/goals/:id/check-ins", plannerController.GetCheckInHistory)

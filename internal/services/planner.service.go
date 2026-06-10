@@ -1,8 +1,10 @@
 package services
 
 import (
+	"context"
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
+	"net/http"
 
 	"gorm.io/gorm"
 )
@@ -10,6 +12,7 @@ import (
 type PlannerService interface {
 	SaveGoal(goal *models.PlannerGoal) error
 	GetLatestGoal(userID uint) (*models.PlannerGoal, error)
+	GetActiveCoach(ctx context.Context, userID uint) (*models.PlannerCoachResponse, error)
 	DeleteGoal(userID uint, goalID string) error
 	RecordCheckIn(entry *models.PlannerCheckInEntry) error
 	GetCheckInHistory(userID uint, goalID string, limit int) ([]models.PlannerCheckInEntry, error)
@@ -17,11 +20,25 @@ type PlannerService interface {
 }
 
 type plannerService struct {
-	repo repository.PlannerRepository
+	repo         repository.PlannerRepository
+	profileRepo  repository.UserProfileRepository
+	activityRepo repository.ActivityRepository
+	httpClient   *http.Client
 }
 
-func NewPlannerService(repo repository.PlannerRepository) PlannerService {
-	return &plannerService{repo: repo}
+func NewPlannerService(
+	repo repository.PlannerRepository,
+	profileRepo repository.UserProfileRepository,
+	activityRepo repository.ActivityRepository,
+) PlannerService {
+	return &plannerService{
+		repo:         repo,
+		profileRepo:  profileRepo,
+		activityRepo: activityRepo,
+		httpClient: &http.Client{
+			Timeout: plannerCoachTimeout(),
+		},
+	}
 }
 
 func (s *plannerService) SaveGoal(goal *models.PlannerGoal) error {
