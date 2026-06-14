@@ -16,35 +16,35 @@ const (
 
 var plannerNumberPattern = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
 
-func buildPlannerCoachMilestoneProgress(
+func buildPlannerMilestoneProgress(
 	service *plannerService,
 	goal *models.PlannerGoal,
 	checkIns []models.PlannerCheckInEntry,
 	profile *models.UserProfile,
 	now time.Time,
-) *models.PlannerCoachMilestoneProgress {
+) *models.PlannerMilestoneProgress {
 	if goal == nil {
 		return nil
 	}
 
 	progressWeek := plannerProgressWeek(goal, now)
-	items := make([]models.PlannerCoachMilestoneItem, 0, len(goal.Features))
+	items := make([]models.PlannerMilestoneItem, 0, len(goal.Features))
 	for _, feature := range goal.Features {
-		item, ok := buildPlannerCoachMilestoneItem(service, goal.UserID, feature, progressWeek, goal.DurationWeeks, profile, checkIns, now)
+		item, ok := buildPlannerMilestoneItem(service, goal.UserID, feature, progressWeek, goal.DurationWeeks, profile, checkIns, now)
 		if !ok {
 			continue
 		}
 		items = append(items, item)
 	}
 
-	return &models.PlannerCoachMilestoneProgress{
+	return &models.PlannerMilestoneProgress{
 		ProgressWeek:  progressWeek,
 		DurationWeeks: goal.DurationWeeks,
 		Items:         items,
 	}
 }
 
-func buildPlannerCoachMilestoneItem(
+func buildPlannerMilestoneItem(
 	service *plannerService,
 	userID uint,
 	feature models.PlannerGoalFeature,
@@ -53,11 +53,11 @@ func buildPlannerCoachMilestoneItem(
 	profile *models.UserProfile,
 	history []models.PlannerCheckInEntry,
 	now time.Time,
-) (models.PlannerCoachMilestoneItem, bool) {
+) (models.PlannerMilestoneItem, bool) {
 	baseline := feature.BaselineValue
 	target := feature.TargetValue
 	if baseline == nil || target == nil {
-		return models.PlannerCoachMilestoneItem{}, false
+		return models.PlannerMilestoneItem{}, false
 	}
 
 	label := plannerDisplayFeatureLabel(feature)
@@ -73,7 +73,7 @@ func buildPlannerCoachMilestoneItem(
 	}
 	latestCheckIn := plannerLatestRelevantCheckIn(feature.FeatureName, history)
 
-	item := models.PlannerCoachMilestoneItem{
+	item := models.PlannerMilestoneItem{
 		FeatureName:      feature.FeatureName,
 		Label:            label,
 		BaselineValue:    baseline,

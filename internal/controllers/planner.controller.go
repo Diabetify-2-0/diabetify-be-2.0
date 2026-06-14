@@ -88,17 +88,17 @@ func (pc *PlannerController) GetLatestGoal(c *gin.Context) {
 	})
 }
 
-func (pc *PlannerController) GetActiveCoach(c *gin.Context) {
+func (pc *PlannerController) GetActiveMilestones(c *gin.Context) {
 	userID, ok := authenticatedUserID(c)
 	if !ok {
 		return
 	}
 
-	coach, err := pc.service.GetActiveCoach(c.Request.Context(), userID)
+	milestones, err := pc.service.GetActiveMilestones(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
-			"message": "Failed to retrieve planner coach",
+			"message": "Failed to retrieve planner milestones",
 			"error":   err.Error(),
 		})
 		return
@@ -106,8 +106,8 @@ func (pc *PlannerController) GetActiveCoach(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"message": "Planner coach retrieved successfully",
-		"data":    coach,
+		"message": "Planner milestones retrieved successfully",
+		"data":    milestones,
 	})
 }
 

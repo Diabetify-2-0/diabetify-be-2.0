@@ -1,10 +1,9 @@
 package services
 
 import (
-	"context"
 	"diabetify/internal/models"
 	"diabetify/internal/repository"
-	"net/http"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -12,7 +11,7 @@ import (
 type PlannerService interface {
 	SaveGoal(goal *models.PlannerGoal) error
 	GetLatestGoal(userID uint) (*models.PlannerGoal, error)
-	GetActiveCoach(ctx context.Context, userID uint) (*models.PlannerCoachResponse, error)
+	GetActiveMilestones(userID uint) (*models.PlannerMilestoneProgress, error)
 	DeleteGoal(userID uint, goalID string) error
 	RecordCheckIn(entry *models.PlannerCheckInEntry) error
 	GetCheckInHistory(userID uint, goalID string, limit int) ([]models.PlannerCheckInEntry, error)
@@ -23,7 +22,6 @@ type plannerService struct {
 	repo         repository.PlannerRepository
 	profileRepo  repository.UserProfileRepository
 	activityRepo repository.ActivityRepository
-	httpClient   *http.Client
 }
 
 func NewPlannerService(
@@ -35,9 +33,6 @@ func NewPlannerService(
 		repo:         repo,
 		profileRepo:  profileRepo,
 		activityRepo: activityRepo,
-		httpClient: &http.Client{
-			Timeout: plannerCoachTimeout(),
-		},
 	}
 }
 
@@ -54,6 +49,25 @@ func (s *plannerService) GetLatestGoal(userID uint) (*models.PlannerGoal, error)
 		return nil, nil
 	}
 	return goal, err
+}
+
+func (s *plannerService) GetActiveMilestones(userID uint) (*models.PlannerMilestoneProgress, error) {
+	goal, err := s.GetLatestGoal(userID)
+	if err != nil || goal == nil {
+		return nil, err
+	}
+
+	checkIns, err := s.GetCheckInHistory(userID, goal.ID, 80)
+	if err != nil {
+		return nil, err
+	}
+
+	profile, err := s.profileRepo.FindByUserID(userID)
+	if err != nil {
+		profile = nil
+	}
+
+	return buildPlannerMilestoneProgress(s, goal, checkIns, profile, time.Now().UTC()), nil
 }
 
 func (s *plannerService) DeleteGoal(userID uint, goalID string) error {

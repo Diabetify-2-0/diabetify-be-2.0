@@ -1,9 +1,7 @@
 package services
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,43 +9,13 @@ import (
 	"diabetify/internal/repository"
 )
 
-func TestPlannerCoachRequestOmitsCounterfactualAndIncludesMilestoneProgress(t *testing.T) {
-	goal := samplePlannerGoal()
-	profile := sampleUserProfile()
-	checkIns := sampleCheckIns()
-	service := &plannerService{}
-	progress := buildPlannerCoachMilestoneProgress(service, goal, checkIns, profile, time.Now().UTC())
-
-	payload := plannerCoachRequest{
-		UserID:            "123",
-		Goal:              buildPlannerCoachGoalPayload(goal),
-		RecentCheckIns:    checkIns,
-		LastCheckIns:      map[string]int64{"weight": checkIns[0].CreatedAtMillis},
-		UserProfile:       profile,
-		MilestoneProgress: progress,
-	}
-
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-
-	body := string(raw)
-	if strings.Contains(body, "counterfactual_result") {
-		t.Fatalf("unexpected counterfactual_result in payload: %s", body)
-	}
-	if !strings.Contains(body, "milestone_progress") {
-		t.Fatalf("expected milestone_progress in payload: %s", body)
-	}
-}
-
-func TestBuildPlannerCoachMilestoneProgressMirrorsBMIProgress(t *testing.T) {
+func TestBuildPlannerMilestoneProgressMirrorsBMIProgress(t *testing.T) {
 	goal := samplePlannerGoal()
 	profile := sampleUserProfile()
 	checkIns := sampleCheckIns()
 
 	service := &plannerService{}
-	progress := buildPlannerCoachMilestoneProgress(service, goal, checkIns, profile, time.UnixMilli(goal.CreatedAtMillis).Add(14*24*time.Hour))
+	progress := buildPlannerMilestoneProgress(service, goal, checkIns, profile, time.UnixMilli(goal.CreatedAtMillis).Add(14*24*time.Hour))
 	if progress == nil {
 		t.Fatal("expected milestone progress")
 	}
@@ -76,7 +44,7 @@ func TestBuildPlannerCoachMilestoneProgressMirrorsBMIProgress(t *testing.T) {
 	}
 }
 
-func TestBuildPlannerCoachMilestoneProgressUsesActivityHistoryForPhysicalActivity(t *testing.T) {
+func TestBuildPlannerMilestoneProgressUsesActivityHistoryForPhysicalActivity(t *testing.T) {
 	baseline := 1.0
 	target := 5.0
 	goal := &models.PlannerGoal{
@@ -110,7 +78,7 @@ func TestBuildPlannerCoachMilestoneProgressUsesActivityHistoryForPhysicalActivit
 			},
 		},
 	}
-	progress := buildPlannerCoachMilestoneProgress(service, goal, nil, profile, time.Now().UTC())
+	progress := buildPlannerMilestoneProgress(service, goal, nil, profile, time.Now().UTC())
 	if progress == nil || len(progress.Items) != 1 {
 		t.Fatalf("expected one activity milestone, got %+v", progress)
 	}
@@ -123,7 +91,7 @@ func TestBuildPlannerCoachMilestoneProgressUsesActivityHistoryForPhysicalActivit
 	}
 }
 
-func TestBuildPlannerCoachMilestoneProgressMarksNumericMilestoneBehindUntilWeeklyTargetReached(t *testing.T) {
+func TestBuildPlannerMilestoneProgressMarksNumericMilestoneBehindUntilWeeklyTargetReached(t *testing.T) {
 	baselineBMI := bmiFromWeightValue(83, 172)
 	targetBMI := bmiFromWeightValue(73, 172)
 	goal := &models.PlannerGoal{
@@ -178,7 +146,7 @@ func TestBuildPlannerCoachMilestoneProgressMarksNumericMilestoneBehindUntilWeekl
 				},
 			}
 
-			progress := buildPlannerCoachMilestoneProgress(service, goal, checkIns, profile, scenarioNow)
+			progress := buildPlannerMilestoneProgress(service, goal, checkIns, profile, scenarioNow)
 			if progress == nil || len(progress.Items) != 1 {
 				t.Fatalf("expected one milestone item, got %+v", progress)
 			}
