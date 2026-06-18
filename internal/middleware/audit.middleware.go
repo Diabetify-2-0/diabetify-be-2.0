@@ -14,15 +14,14 @@ import (
 // Only mutating routes we care about are listed here.
 var pathAction = map[string]map[string]string{
 	"POST": {
-		"/data/datasets":                          "UPLOAD_DATASET",
-		"/data/datasets/:id/preprocess":           "PREPROCESS_DATASET",
-		"/data/training/trigger":                  "TRIGGER_TRAINING",
-		"/data/shadow/activate":                   "ACTIVATE_SHADOW",
-		"/data/shadow/deactivate/:deployment_id":  "DEACTIVATE_SHADOW",
-		"/data/drift/trigger":                     "TRIGGER_DRIFT",
-		"/data/drift/alerts/:id/acknowledge":      "ACKNOWLEDGE_DRIFT",
-		"/expert/models/:id/approve":              "APPROVE_MODEL",
-		"/expert/models/:id/reject":               "REJECT_MODEL",
+		"/data/datasets":                         "UPLOAD_DATASET",
+		"/data/datasets/:id/preprocess":          "PREPROCESS_DATASET",
+		"/data/training/trigger":                 "TRIGGER_TRAINING",
+		"/data/shadow/activate":                  "ACTIVATE_SHADOW",
+		"/data/shadow/deactivate/:deployment_id": "DEACTIVATE_SHADOW",
+		"/data/drift/trigger":                    "TRIGGER_DRIFT",
+		"/expert/models/:id/approve":             "APPROVE_MODEL",
+		"/expert/models/:id/reject":              "REJECT_MODEL",
 	},
 	"PUT": {
 		"/data/drift/config": "UPDATE_DRIFT_CONFIG",

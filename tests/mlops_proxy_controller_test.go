@@ -216,33 +216,6 @@ func TestMLOpsProxyEnrichesModelsList(t *testing.T) {
 	repo.AssertExpectations(t)
 }
 
-func TestMLOpsProxyEnrichesDriftAlerts(t *testing.T) {
-	mlopsBody, _ := json.Marshal(map[string]interface{}{
-		"data": []map[string]interface{}{
-			{"id": 1, "acknowledged_by": 6},
-		},
-	})
-	startMLOpsMock(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write(mlopsBody)
-	})
-
-	repo := new(mocks.MockUserRepository)
-	repo.On("GetUserByID", uint(6)).Return(&models.User{Name: "Eve"}, nil)
-	router := buildMLOpsRouter(http.MethodGet, "/drift/alerts", "/drift/alerts", 1, repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/drift/alerts", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var body map[string]interface{}
-	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	row := body["data"].([]interface{})[0].(map[string]interface{})
-	assert.Equal(t, "Eve", row["acknowledged_by_name"])
-	repo.AssertExpectations(t)
-}
-
 func TestMLOpsProxyFallbackNameForUnknownUser(t *testing.T) {
 	mlopsBody, _ := json.Marshal(map[string]interface{}{
 		"data": []map[string]interface{}{

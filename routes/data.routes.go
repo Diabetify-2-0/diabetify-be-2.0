@@ -28,7 +28,7 @@ func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository, 
 		data.GET("/training/jobs", controllers.MLOpsProxy("/training/jobs", userRepo))
 		data.GET("/training/jobs/:id", controllers.MLOpsProxy("/training/jobs/:id", userRepo))
 		data.POST("/training/jobs/:id/cancel", controllers.MLOpsProxy("/training/jobs/:id/cancel", userRepo))
-		data.GET("/training/ddm-base-info", controllers.MLOpsProxy("/training/ddm-base-info", userRepo))
+		data.GET("/training/data-blending-base-info", controllers.MLOpsProxy("/training/data-blending-base-info", userRepo))
 
 		// Model versions
 		data.GET("/models", controllers.MLOpsProxy("/models", userRepo))
@@ -41,8 +41,6 @@ func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository, 
 
 		// Drift detection
 		data.POST("/drift/trigger", controllers.MLOpsProxy("/drift/trigger", userRepo))
-		data.GET("/drift/alerts", controllers.MLOpsProxy("/drift/alerts", userRepo))
-		data.POST("/drift/alerts/:id/acknowledge", controllers.MLOpsProxy("/drift/alerts/:id/acknowledge", userRepo))
 		data.GET("/drift/analytics", controllers.MLOpsProxy("/drift/analytics", userRepo))
 		data.GET("/drift/config", controllers.MLOpsProxy("/drift/config", userRepo))
 		data.PUT("/drift/config", controllers.MLOpsProxy("/drift/config", userRepo))

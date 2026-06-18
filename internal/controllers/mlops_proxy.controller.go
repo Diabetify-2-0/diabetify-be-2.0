@@ -85,7 +85,7 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 		// Only buffer for endpoints where we need to enrich user names.
 		// All other responses (including file downloads) are streamed directly.
 		needsEnrichment := c.Request.Method == "GET" && resp.StatusCode == http.StatusOK &&
-			(strings.HasSuffix(path, "/datasets") || strings.HasSuffix(path, "/training/jobs") || strings.HasSuffix(path, "/models") || strings.HasSuffix(path, "/drift/alerts"))
+			(strings.HasSuffix(path, "/datasets") || strings.HasSuffix(path, "/training/jobs") || strings.HasSuffix(path, "/models"))
 
 		if !needsEnrichment {
 			for key, values := range resp.Header {
@@ -117,7 +117,7 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 				uniqueIDs := make(map[uint]bool)
 				for _, item := range data {
 					if row, ok := item.(map[string]interface{}); ok {
-						for _, key := range []string{"uploaded_by", "triggered_by", "trained_by", "acknowledged_by"} {
+						for _, key := range []string{"uploaded_by", "triggered_by", "trained_by", "acknowledged_by", "reviewed_by"} {
 							if val, ok := row[key]; ok {
 								if f, ok := val.(float64); ok {
 									uniqueIDs[uint(f)] = true
@@ -156,6 +156,11 @@ func MLOpsProxy(targetPath string, userRepo repository.UserRepository) gin.Handl
 						if val, ok := row["acknowledged_by"]; ok {
 							if f, ok := val.(float64); ok {
 								row["acknowledged_by_name"] = userNames[uint(f)]
+							}
+						}
+						if val, ok := row["reviewed_by"]; ok {
+							if f, ok := val.(float64); ok {
+								row["reviewed_by_name"] = userNames[uint(f)]
 							}
 						}
 					}

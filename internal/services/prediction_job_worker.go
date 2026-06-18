@@ -118,6 +118,7 @@ type RabbitMQPredictionResponse struct {
 	Timestamp     string                            `json:"timestamp"`
 	CorrelationID string                            `json:"correlation_id"`
 	Error         *string                           `json:"error"`
+	ModelID       *int                              `json:"model_id"`
 }
 
 // ========== INTERFACE IMPLEMENTATIONS ==========
@@ -415,7 +416,7 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 	go w.updateShadowChampionResult(jobID, rabbitResponse.Prediction)
 
 	// Log features + SHAP to MLOps for drift detection (fire-and-forget)
-	go w.sendDriftLog(jobID, featureInfo, prediction)
+	go w.sendDriftLog(jobID, featureInfo, prediction, rabbitResponse.ModelID)
 }
 
 func (w *predictionJobWorker) worker(workerID int) {
@@ -1004,7 +1005,7 @@ func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore
 	resp.Body.Close()
 }
 
-func (w *predictionJobWorker) sendDriftLog(jobID string, featureInfo map[string]interface{}, pred *models.Prediction) {
+func (w *predictionJobWorker) sendDriftLog(jobID string, featureInfo map[string]interface{}, pred *models.Prediction, modelID *int) {
 	featureMap := map[string]float64{
 		"age":                         float64(pred.Age),
 		"smoking_status":              float64(pred.SmokingStatus),
@@ -1028,12 +1029,16 @@ func (w *predictionJobWorker) sendDriftLog(jobID string, featureInfo map[string]
 		"is_hypertension":             pred.IsHypertensionShap,
 	}
 
-	body, err := json.Marshal(map[string]interface{}{
+	payload := map[string]interface{}{
 		"job_id":      jobID,
 		"features":    featureMap,
 		"shap_values": shapMap,
 		"risk_score":  pred.RiskScore,
-	})
+	}
+	if modelID != nil {
+		payload["model_id"] = *modelID
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return
 	}
