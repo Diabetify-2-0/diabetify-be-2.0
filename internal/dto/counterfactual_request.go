@@ -6,13 +6,10 @@ import (
 )
 
 type CounterfactualSubmitRequest struct {
-	PatientID    *string                 `json:"patient_id,omitempty"`
-	ModelVersion string                  `json:"model_version,omitempty"`
-	Target       *CounterfactualTarget   `json:"target,omitempty"`
-	Instance     *CounterfactualInstance `json:"instance"`
-	Constraints  *CounterfactualRules    `json:"constraints"`
-	Generation   *CounterfactualGenerate `json:"generation,omitempty"`
-	Preferences  *CounterfactualPrefs    `json:"preferences,omitempty"`
+	Target      *CounterfactualTarget   `json:"target,omitempty"`
+	Instance    *CounterfactualInstance `json:"instance"`
+	Constraints *CounterfactualRules    `json:"constraints"`
+	Generation  *CounterfactualGenerate `json:"generation,omitempty"`
 }
 
 type CounterfactualTarget struct {
@@ -25,22 +22,12 @@ type CounterfactualInstance struct {
 }
 
 type CounterfactualRules struct {
-	ImmutableFeatures     []string `json:"immutable_features,omitempty"`
-	MutableAllowed        []string `json:"mutable_allowed,omitempty"`
-	MustNotChange         []string `json:"must_not_change,omitempty"`
-	MedicalRuleSetVersion string   `json:"medical_rule_set_version,omitempty"`
+	ImmutableFeatures []string `json:"immutable_features,omitempty"`
+	MutableAllowed    []string `json:"mutable_allowed,omitempty"`
 }
 
 type CounterfactualGenerate struct {
-	TotalCFs   int    `json:"total_cfs,omitempty"`
-	Method     string `json:"method,omitempty"`
-	RandomSeed int    `json:"random_seed,omitempty"`
-	TimeoutMS  int    `json:"timeout_ms,omitempty"`
-}
-
-type CounterfactualPrefs struct {
-	CostWeights      map[string]float64 `json:"cost_weights,omitempty"`
-	ObjectiveWeights map[string]float64 `json:"objective_weights,omitempty"`
+	TimeoutMS int `json:"timeout_ms,omitempty"`
 }
 
 func (r *CounterfactualSubmitRequest) Validate() error {
@@ -71,9 +58,6 @@ func (r *CounterfactualSubmitRequest) Validate() error {
 	}
 
 	if r.Generation != nil {
-		if r.Generation.TotalCFs != 0 && (r.Generation.TotalCFs < 1 || r.Generation.TotalCFs > 20) {
-			return fmt.Errorf("generation.total_cfs must be between 1 and 20")
-		}
 		if r.Generation.TimeoutMS != 0 && (r.Generation.TimeoutMS < 100 || r.Generation.TimeoutMS > 60000) {
 			return fmt.Errorf("generation.timeout_ms must be between 100 and 60000")
 		}
@@ -90,20 +74,11 @@ func (r *CounterfactualSubmitRequest) ToWorkerPayload(jobID string) map[string]i
 		"constraints": r.Constraints,
 	}
 
-	if r.PatientID != nil {
-		payload["patient_id"] = *r.PatientID
-	}
-	if r.ModelVersion != "" {
-		payload["model_version"] = r.ModelVersion
-	}
 	if r.Target != nil {
 		payload["target"] = r.Target
 	}
-	if r.Generation != nil {
+	if r.Generation != nil && r.Generation.TimeoutMS != 0 {
 		payload["generation"] = r.Generation
-	}
-	if r.Preferences != nil {
-		payload["preferences"] = r.Preferences
 	}
 
 	return payload

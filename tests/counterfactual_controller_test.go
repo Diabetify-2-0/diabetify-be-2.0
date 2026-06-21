@@ -56,11 +56,6 @@ func TestCounterfactualSubmitRejectsInvalidPayload(t *testing.T) {
 			body:        `{"instance":{"features":{"age":50}},"constraints":{"immutable_features":["age"],"mutable_allowed":["age"]}}`,
 			expectedErr: "immutable and mutable overlap",
 		},
-		{
-			name:        "invalid generation bounds",
-			body:        `{"instance":{"features":{"age":50}},"constraints":{},"generation":{"total_cfs":25}}`,
-			expectedErr: "generation.total_cfs must be between 1 and 20",
-		},
 	}
 
 	for _, tt := range tests {
