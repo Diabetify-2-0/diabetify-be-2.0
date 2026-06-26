@@ -22,8 +22,7 @@ type CounterfactualInstance struct {
 }
 
 type CounterfactualRules struct {
-	ImmutableFeatures []string `json:"immutable_features,omitempty"`
-	MutableAllowed    []string `json:"mutable_allowed,omitempty"`
+	MutableAllowed []string `json:"mutable_allowed,omitempty"`
 }
 
 type CounterfactualGenerate struct {
@@ -44,16 +43,6 @@ func (r *CounterfactualSubmitRequest) Validate() error {
 	if r.Target != nil {
 		if r.Target.MinTargetProbability < 0 || r.Target.MinTargetProbability > 1 {
 			return fmt.Errorf("target.min_target_probability must be between 0 and 1")
-		}
-	}
-
-	immutable := make(map[string]bool, len(r.Constraints.ImmutableFeatures))
-	for _, feature := range r.Constraints.ImmutableFeatures {
-		immutable[feature] = true
-	}
-	for _, feature := range r.Constraints.MutableAllowed {
-		if immutable[feature] {
-			return fmt.Errorf("immutable and mutable overlap: %s", feature)
 		}
 	}
 

@@ -52,9 +52,9 @@ func TestCounterfactualSubmitRejectsInvalidPayload(t *testing.T) {
 			expectedErr: "instance.features is required",
 		},
 		{
-			name:        "overlapping immutable and mutable features",
-			body:        `{"instance":{"features":{"age":50}},"constraints":{"immutable_features":["age"],"mutable_allowed":["age"]}}`,
-			expectedErr: "immutable and mutable overlap",
+			name:        "legacy immutable features field is rejected",
+			body:        `{"instance":{"features":{"age":50}},"constraints":{"immutable_features":["age"],"mutable_allowed":["weight"]}}`,
+			expectedErr: "unknown field",
 		},
 	}
 
