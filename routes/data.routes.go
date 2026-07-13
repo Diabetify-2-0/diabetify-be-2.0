@@ -42,6 +42,7 @@ func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository, 
 		// Drift detection
 		data.POST("/drift/trigger", controllers.MLOpsProxy("/drift/trigger", userRepo))
 		data.GET("/drift/analytics", controllers.MLOpsProxy("/drift/analytics", userRepo))
+		data.GET("/drift/analytics/history", controllers.MLOpsProxy("/drift/analytics/history", userRepo))
 		data.GET("/drift/config", controllers.MLOpsProxy("/drift/config", userRepo))
 		data.PUT("/drift/config", controllers.MLOpsProxy("/drift/config", userRepo))
 		data.GET("/drift/log/count", controllers.MLOpsProxy("/drift/log/count", userRepo))
