@@ -105,7 +105,7 @@ func NewPredictionJobWorker(
 		redisClient:     redisClient,
 		rabbitURL:       rabbitURL,
 		mlopsURL:        mlopsURL,
-		shadowClient:    &http.Client{Timeout: 5 * time.Second},
+		shadowClient:    &http.Client{Timeout: 500 * time.Millisecond},
 		shadowSem:       make(chan struct{}, 50),
 	}
 }
@@ -412,10 +412,8 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	go syncXaiToChatbot(job.UserID, rabbitResponse)
 
-	// Update shadow prediction with champion result (fire-and-forget)
 	go w.updateShadowChampionResult(jobID, rabbitResponse.Prediction)
 
-	// Log features + SHAP to MLOps for drift detection (fire-and-forget)
 	go w.sendDriftLog(jobID, featureInfo, prediction, rabbitResponse.ModelID)
 }
 
@@ -953,7 +951,6 @@ func (w *predictionJobWorker) boolToFloat(b bool) float64 {
 	return 0.0
 }
 
-
 var featureColumnNames = []string{
 	"age", "smoking_status", "is_cholesterol", "is_macrosomic_baby",
 	"physical_activity_frequency", "is_bloodline", "brinkman_index", "bmi", "is_hypertension",
@@ -973,6 +970,14 @@ func ScoreToRiskLabel(riskScore float64) string {
 }
 
 func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
+	if w.redisClient == nil {
+		return
+	}
+	info, err := w.redisClient.GetActiveChallengerInfo()
+	if err != nil || info == nil {
+		return
+	}
+
 	select {
 	case w.shadowSem <- struct{}{}:
 		defer func() { <-w.shadowSem }()

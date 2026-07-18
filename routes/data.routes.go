@@ -38,6 +38,8 @@ func RegisterDataRoutes(router *gin.Engine, userRepo repository.UserRepository, 
 		data.POST("/shadow/activate", controllers.MLOpsProxy("/shadow/activate", userRepo))
 		data.POST("/shadow/deactivate/:deployment_id", controllers.MLOpsProxy("/shadow/deactivate/:deployment_id", userRepo))
 		data.GET("/shadow/active", controllers.MLOpsProxy("/shadow/active", userRepo))
+		data.GET("/shadow/:deployment_id/stats", controllers.MLOpsProxy("/shadow/:deployment_id/stats", userRepo))
+		data.GET("/shadow/:deployment_id/predictions", controllers.MLOpsProxy("/shadow/:deployment_id/predictions", userRepo))
 
 		// Drift detection
 		data.POST("/drift/trigger", controllers.MLOpsProxy("/drift/trigger", userRepo))
