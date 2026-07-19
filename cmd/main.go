@@ -128,9 +128,9 @@ func main() {
 	}
 
 	// Initialize Prediction Job Worker
-	workerCount := runtime.NumCPU()
-	if workerCount < 3 {
-		workerCount = 3
+	workerCount := runtime.NumCPU() * 8
+	if workerCount < 20 {
+		workerCount = 20
 	}
 
 	predictionJobWorker := services.NewPredictionJobWorker(

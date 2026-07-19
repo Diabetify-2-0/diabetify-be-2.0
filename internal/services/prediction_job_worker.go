@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"diabetify/internal/cache"
 	"diabetify/internal/config"
@@ -10,8 +9,6 @@ import (
 	"diabetify/internal/repository"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sync"
 	"time"
 
@@ -55,14 +52,17 @@ type predictionJobWorker struct {
 	conn            *amqp.Connection
 	responseChannel *amqp.Channel
 
+	// RabbitMQ for MLOps shadow/drift traffic (separate broker)
+	mlopsConn      *amqp.Connection
+	mlopsChannel   *amqp.Channel
+	mlopsRabbitMu  sync.Mutex
+
 	// Configuration
 	maxJobTimeout   time.Duration
 	cleanupInterval time.Duration
 	redisClient     *cache.RedisClient
 	rabbitURL       string
-	mlopsURL        string
-	shadowClient    *http.Client
-	shadowSem       chan struct{}
+	mlopsRabbitURL  string
 }
 
 // NewPredictionJobWorker creates a new prediction job worker
@@ -88,7 +88,7 @@ func NewPredictionJobWorker(
 		fmt.Printf("Warning: Failed to connect to Redis: %v\n", err)
 	}
 
-	mlopsURL := config.Load().MLOps.ServiceURL
+	cfg := config.Load()
 
 	return &predictionJobWorker{
 		jobRepo:         jobRepo,
@@ -97,16 +97,14 @@ func NewPredictionJobWorker(
 		profileRepo:     profileRepo,
 		activityRepo:    activityRepo,
 		mlClient:        mlClient,
-		jobQueue:        make(chan models.PredictionJobRequest, 2000),
+		jobQueue:        make(chan models.PredictionJobRequest, 10000),
 		workerCount:     workerCount,
 		stopChan:        make(chan struct{}),
 		maxJobTimeout:   30 * time.Second,
 		cleanupInterval: 30 * time.Minute,
 		redisClient:     redisClient,
 		rabbitURL:       rabbitURL,
-		mlopsURL:        mlopsURL,
-		shadowClient:    &http.Client{Timeout: 500 * time.Millisecond},
-		shadowSem:       make(chan struct{}, 50),
+		mlopsRabbitURL:  cfg.RabbitMQ.MLOpsURL,
 	}
 }
 
@@ -138,6 +136,10 @@ func (w *predictionJobWorker) Start() {
 		w.mu.Unlock()
 		fmt.Printf("ERROR: Failed to setup RabbitMQ response handler: %v\n", err)
 		return
+	}
+
+	if err := w.connectMLOpsRabbit(); err != nil {
+		fmt.Printf("Warning: MLOps RabbitMQ not available at startup (will retry on first publish): %v\n", err)
 	}
 
 	// Start worker goroutines for job processing
@@ -179,6 +181,15 @@ func (w *predictionJobWorker) Stop() {
 		w.conn.Close()
 	}
 	w.mu.Unlock()
+
+	w.mlopsRabbitMu.Lock()
+	if w.mlopsChannel != nil {
+		w.mlopsChannel.Close()
+	}
+	if w.mlopsConn != nil {
+		w.mlopsConn.Close()
+	}
+	w.mlopsRabbitMu.Unlock()
 }
 
 func (w *predictionJobWorker) reconnectWithBackoff() (<-chan amqp.Delivery, error) {
@@ -414,7 +425,7 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	go w.updateShadowChampionResult(jobID, rabbitResponse.Prediction)
 
-	go w.sendDriftLog(jobID, featureInfo, prediction, rabbitResponse.ModelID)
+	go w.sendDriftLog(jobID, prediction, rabbitResponse.ModelID)
 }
 
 func (w *predictionJobWorker) worker(workerID int) {
@@ -509,6 +520,146 @@ func (w *predictionJobWorker) cleanupRoutine() {
 	}
 }
 
+// ========== MLOPS RABBITMQ PUBLISH ==========
+
+func (w *predictionJobWorker) connectMLOpsRabbit() error {
+	conn, err := amqp.Dial(w.mlopsRabbitURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to MLOps RabbitMQ: %v", err)
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to open MLOps channel: %v", err)
+	}
+	for _, q := range []string{"ml.shadow.predict", "ml.shadow.result", "ml.drift.log"} {
+		if _, err := ch.QueueDeclare(q, true, false, false, false, nil); err != nil {
+			ch.Close()
+			conn.Close()
+			return fmt.Errorf("failed to declare MLOps queue %s: %v", q, err)
+		}
+	}
+	w.mlopsConn = conn
+	w.mlopsChannel = ch
+	return nil
+}
+
+func (w *predictionJobWorker) publishToMLOps(queue string, body []byte) {
+	w.mlopsRabbitMu.Lock()
+	defer w.mlopsRabbitMu.Unlock()
+
+	if w.mlopsConn == nil || w.mlopsConn.IsClosed() {
+		if err := w.connectMLOpsRabbit(); err != nil {
+			fmt.Printf("Warning: MLOps RabbitMQ not available: %v\n", err)
+			return
+		}
+	}
+
+	if err := w.mlopsChannel.Publish(
+		"", queue, false, false,
+		amqp.Publishing{ContentType: "application/json", Body: body},
+	); err != nil {
+		fmt.Printf("Warning: failed to publish to MLOps queue %s: %v\n", queue, err)
+		w.mlopsChannel.Close()
+		w.mlopsConn.Close()
+		w.mlopsConn = nil
+		w.mlopsChannel = nil
+	}
+}
+
+// ========== SHADOW / DRIFT FIRE-AND-FORGET ==========
+
+func (w *predictionJobWorker) sendShadowPrediction(jobID string, features []float64) {
+	if w.redisClient == nil {
+		return
+	}
+	info, err := w.redisClient.GetActiveChallengerInfo()
+	if err != nil || info == nil {
+		return
+	}
+
+	featureMap := make(map[string]float64, len(featureColumnNames))
+	for i, name := range featureColumnNames {
+		if i < len(features) {
+			featureMap[name] = features[i]
+		}
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"deployment_id":   info.DeploymentID,
+		"champion_job_id": jobID,
+		"features":        featureMap,
+	})
+	if err != nil {
+		return
+	}
+	w.publishToMLOps("ml.shadow.predict", body)
+}
+
+func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
+	if w.redisClient == nil {
+		return
+	}
+	info, err := w.redisClient.GetActiveChallengerInfo()
+	if err != nil || info == nil {
+		return
+	}
+
+	riskLabel := ScoreToRiskLabel(riskScore)
+	body, err := json.Marshal(map[string]interface{}{
+		"champion_job_id": jobID,
+		"champion_result": map[string]interface{}{
+			"risk_score": riskScore,
+			"risk_label": riskLabel,
+		},
+	})
+	if err != nil {
+		return
+	}
+	w.publishToMLOps("ml.shadow.result", body)
+}
+
+func (w *predictionJobWorker) sendDriftLog(jobID string, pred *models.Prediction, modelID *int) {
+	featureMap := map[string]float64{
+		"age":                         float64(pred.Age),
+		"smoking_status":              float64(pred.SmokingStatus),
+		"is_cholesterol":              w.boolToFloat(pred.IsCholesterol),
+		"is_macrosomic_baby":          float64(pred.IsMacrosomicBaby),
+		"physical_activity_frequency": float64(pred.PhysicalActivityFrequency),
+		"is_bloodline":                w.boolToFloat(pred.IsBloodline),
+		"brinkman_index":              float64(pred.BrinkmanScore),
+		"bmi":                         pred.BMI,
+		"is_hypertension":             w.boolToFloat(pred.IsHypertension),
+	}
+	shapMap := map[string]float64{
+		"age":                         pred.AgeShap,
+		"smoking_status":              pred.SmokingStatusShap,
+		"is_cholesterol":              pred.IsCholesterolShap,
+		"is_macrosomic_baby":          pred.IsMacrosomicBabyShap,
+		"physical_activity_frequency": pred.PhysicalActivityFrequencyShap,
+		"is_bloodline":                pred.IsBloodlineShap,
+		"brinkman_index":              pred.BrinkmanScoreShap,
+		"bmi":                         pred.BMIShap,
+		"is_hypertension":             pred.IsHypertensionShap,
+	}
+
+	payload := map[string]interface{}{
+		"job_id":      jobID,
+		"features":    featureMap,
+		"shap_values": shapMap,
+		"risk_score":  pred.RiskScore,
+	}
+	if modelID != nil {
+		payload["model_id"] = *modelID
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	w.publishToMLOps("ml.drift.log", body)
+}
+
 // ========== HELPER METHODS ==========
 
 func parseTimestamp(timestampStr string) time.Time {
@@ -547,21 +698,6 @@ func convertToModelsResponse(rabbitResponse *RabbitMQPredictionResponse) *models
 	}
 }
 
-func (w *predictionJobWorker) buildFeatureExplanations(response *models.PredictionResponse) map[string]map[string]interface{} {
-	explanations := make(map[string]map[string]interface{})
-	features := []struct{ name, key string }{
-		{"age", "age"}, {"BMI", "BMI"}, {"brinkman_index", "brinkman_index"},
-		{"is_hypertension", "is_hypertension"}, {"is_cholesterol", "is_cholesterol"},
-		{"is_bloodline", "is_bloodline"}, {"is_macrosomic_baby", "is_macrosomic_baby"},
-		{"smoking_status", "smoking_status"}, {"moderate_physical_activity_frequency", "moderate_physical_activity_frequency"},
-	}
-	for _, f := range features {
-		if exp, ok := response.Explanation[f.key]; ok {
-			explanations[f.name] = map[string]interface{}{"shap": exp.Shap, "contribution": exp.Contribution, "impact": exp.Impact}
-		}
-	}
-	return explanations
-}
 
 func (w *predictionJobWorker) extractFeatureInfoFromMLResponse(response *RabbitMQPredictionResponse, avgSmokeCount int) map[string]interface{} {
 	featureInfo := make(map[string]interface{})
@@ -967,154 +1103,4 @@ func ScoreToRiskLabel(riskScore float64) string {
 	default:
 		return "low"
 	}
-}
-
-func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore float64) {
-	if w.redisClient == nil {
-		return
-	}
-	info, err := w.redisClient.GetActiveChallengerInfo()
-	if err != nil || info == nil {
-		return
-	}
-
-	select {
-	case w.shadowSem <- struct{}{}:
-		defer func() { <-w.shadowSem }()
-	default:
-		return
-	}
-
-	riskLabel := ScoreToRiskLabel(riskScore)
-	body, err := json.Marshal(map[string]interface{}{
-		"champion_result": map[string]interface{}{
-			"risk_score": riskScore,
-			"risk_label": riskLabel,
-		},
-	})
-	if err != nil {
-		return
-	}
-	url := fmt.Sprintf("%s/shadow/predict/%s/result", w.mlopsURL, jobID)
-	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := w.shadowClient.Do(req)
-	if err != nil {
-		fmt.Printf("Warning: failed to update shadow champion result for job %s: %v\n", jobID, err)
-		return
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-}
-
-func (w *predictionJobWorker) sendDriftLog(jobID string, featureInfo map[string]interface{}, pred *models.Prediction, modelID *int) {
-	select {
-	case w.shadowSem <- struct{}{}:
-		defer func() { <-w.shadowSem }()
-	default:
-		return
-	}
-
-	featureMap := map[string]float64{
-		"age":                         float64(pred.Age),
-		"smoking_status":              float64(pred.SmokingStatus),
-		"is_cholesterol":              w.boolToFloat(pred.IsCholesterol),
-		"is_macrosomic_baby":          float64(pred.IsMacrosomicBaby),
-		"physical_activity_frequency": float64(pred.PhysicalActivityFrequency),
-		"is_bloodline":                w.boolToFloat(pred.IsBloodline),
-		"brinkman_index":              float64(pred.BrinkmanScore),
-		"bmi":                         pred.BMI,
-		"is_hypertension":             w.boolToFloat(pred.IsHypertension),
-	}
-	shapMap := map[string]float64{
-		"age":                         pred.AgeShap,
-		"smoking_status":              pred.SmokingStatusShap,
-		"is_cholesterol":              pred.IsCholesterolShap,
-		"is_macrosomic_baby":          pred.IsMacrosomicBabyShap,
-		"physical_activity_frequency": pred.PhysicalActivityFrequencyShap,
-		"is_bloodline":                pred.IsBloodlineShap,
-		"brinkman_index":              pred.BrinkmanScoreShap,
-		"bmi":                         pred.BMIShap,
-		"is_hypertension":             pred.IsHypertensionShap,
-	}
-
-	payload := map[string]interface{}{
-		"job_id":      jobID,
-		"features":    featureMap,
-		"shap_values": shapMap,
-		"risk_score":  pred.RiskScore,
-	}
-	if modelID != nil {
-		payload["model_id"] = *modelID
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/drift/log", w.mlopsURL), bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := w.shadowClient.Do(req)
-	if err != nil {
-		fmt.Printf("Warning: drift log request failed: %v\n", err)
-		return
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-}
-
-func (w *predictionJobWorker) sendShadowPrediction(jobID string, features []float64) {
-	select {
-	case w.shadowSem <- struct{}{}:
-		defer func() { <-w.shadowSem }()
-	default:
-		return
-	}
-
-	if w.redisClient == nil {
-		return
-	}
-	info, err := w.redisClient.GetActiveChallengerInfo()
-	if err != nil || info == nil {
-		return
-	}
-
-	featureMap := make(map[string]float64, len(featureColumnNames))
-	for i, name := range featureColumnNames {
-		if i < len(features) {
-			featureMap[name] = features[i]
-		}
-	}
-
-	body, err := json.Marshal(map[string]interface{}{
-		"champion_job_id": jobID,
-		"features":        featureMap,
-	})
-	if err != nil {
-		return
-	}
-
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/shadow/predict", w.mlopsURL), bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := w.shadowClient.Do(req)
-	if err != nil {
-		fmt.Printf("Warning: shadow prediction request failed: %v\n", err)
-		return
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
 }

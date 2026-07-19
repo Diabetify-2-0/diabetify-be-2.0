@@ -38,7 +38,8 @@ type JWTConfig struct {
 }
 
 type RabbitMQConfig struct {
-	URL string
+	URL      string
+	MLOpsURL string
 }
 
 type RedisConfig struct {
@@ -93,7 +94,8 @@ func Load() Settings {
 			Secret: strings.TrimSpace(os.Getenv("JWT_SECRET_KEY")),
 		},
 		RabbitMQ: RabbitMQConfig{
-			URL: env("RABBITMQ_URL", "amqp://admin:password123@localhost:5672/"),
+			URL:      env("RABBITMQ_URL", "amqp://admin:password123@localhost:5672/"),
+			MLOpsURL: env("MLOPS_RABBITMQ_URL", "amqp://admin:password123@localhost:5673/"),
 		},
 		Redis: RedisConfig{
 			URL:      strings.TrimSpace(os.Getenv("REDIS_URL")),

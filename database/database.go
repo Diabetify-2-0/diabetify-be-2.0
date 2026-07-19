@@ -78,8 +78,8 @@ func ConnectDatabase() {
 		log.Fatalf("Failed to get database connection: %v", err)
 	}
 
-	sqlDB.SetMaxOpenConns(1000)
-	sqlDB.SetMaxIdleConns(200)
+	sqlDB.SetMaxOpenConns(200)
+	sqlDB.SetMaxIdleConns(50)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(1 * time.Minute)
 
@@ -169,8 +169,8 @@ func connectToShard(config ShardConfig) *gorm.DB {
 		log.Fatalf("Failed to get database connection for %s: %v", config.Name, err)
 	}
 
-	sqlDB.SetMaxOpenConns(1000)
-	sqlDB.SetMaxIdleConns(200)
+	sqlDB.SetMaxOpenConns(200)
+	sqlDB.SetMaxIdleConns(50)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(1 * time.Minute)
 
