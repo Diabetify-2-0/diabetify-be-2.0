@@ -1011,6 +1011,13 @@ func (w *predictionJobWorker) updateShadowChampionResult(jobID string, riskScore
 }
 
 func (w *predictionJobWorker) sendDriftLog(jobID string, featureInfo map[string]interface{}, pred *models.Prediction, modelID *int) {
+	select {
+	case w.shadowSem <- struct{}{}:
+		defer func() { <-w.shadowSem }()
+	default:
+		return
+	}
+
 	featureMap := map[string]float64{
 		"age":                         float64(pred.Age),
 		"smoking_status":              float64(pred.SmokingStatus),
