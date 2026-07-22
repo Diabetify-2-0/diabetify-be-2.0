@@ -8,7 +8,7 @@ import (
 
 type AuditLogRepository interface {
 	Create(log *models.AuditLog) error
-	List(offset, limit int) ([]*models.AuditLog, int64, error)
+	List(offset, limit int, search string) ([]*models.AuditLog, int64, error)
 	GetByID(id uint) (*models.AuditLog, error)
 }
 
@@ -24,15 +24,22 @@ func (r *auditLogRepository) Create(log *models.AuditLog) error {
 	return r.db.Create(log).Error
 }
 
-func (r *auditLogRepository) List(offset, limit int) ([]*models.AuditLog, int64, error) {
+func (r *auditLogRepository) List(offset, limit int, search string) ([]*models.AuditLog, int64, error) {
 	var logs []*models.AuditLog
 	var total int64
 
-	if err := r.db.Model(&models.AuditLog{}).Count(&total).Error; err != nil {
+	q := r.db.Model(&models.AuditLog{})
+	if search != "" {
+		q = q.Joins("LEFT JOIN users ON users.id = audit_logs.user_id").
+			Where("audit_logs.details ILIKE ? OR audit_logs.action ILIKE ? OR users.name ILIKE ?",
+				"%"+search+"%", "%"+search+"%", "%"+search+"%")
+	}
+
+	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	err := r.db.Order("created_at DESC").Offset(offset).Limit(limit).Find(&logs).Error
+	err := q.Order("audit_logs.created_at DESC").Offset(offset).Limit(limit).Find(&logs).Error
 	return logs, total, err
 }
 

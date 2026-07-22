@@ -33,6 +33,7 @@ func NewAuditLogController(auditRepo repository.AuditLogRepository, userRepo rep
 func (ctrl *AuditLogController) ListAuditLogs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	search := c.DefaultQuery("search", "")
 	if page < 1 {
 		page = 1
 	}
@@ -41,7 +42,7 @@ func (ctrl *AuditLogController) ListAuditLogs(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 
-	logs, total, err := ctrl.auditRepo.List(offset, pageSize)
+	logs, total, err := ctrl.auditRepo.List(offset, pageSize, search)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": err.Error()})
 		return
