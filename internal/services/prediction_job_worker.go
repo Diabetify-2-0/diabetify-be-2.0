@@ -53,9 +53,9 @@ type predictionJobWorker struct {
 	responseChannel *amqp.Channel
 
 	// RabbitMQ for MLOps shadow/drift traffic (separate broker)
-	mlopsConn      *amqp.Connection
-	mlopsChannel   *amqp.Channel
-	mlopsRabbitMu  sync.Mutex
+	mlopsConn     *amqp.Connection
+	mlopsChannel  *amqp.Channel
+	mlopsRabbitMu sync.Mutex
 
 	// Configuration
 	maxJobTimeout   time.Duration
@@ -364,13 +364,16 @@ func (w *predictionJobWorker) handleMLResponses(msgs <-chan amqp.Delivery) {
 				msgs = newMsgs
 				continue
 			}
+			fmt.Printf("DEBUG[response]: received msg correlationID=%s bodyLen=%d\n", msg.CorrelationId, len(msg.Body))
 			var rabbitResponse RabbitMQPredictionResponse
 			if err := json.Unmarshal(msg.Body, &rabbitResponse); err != nil {
 				fmt.Printf("ERROR: Failed to unmarshal RabbitMQ message for CorrelationID %s: %v\n", msg.CorrelationId, err)
-				msg.Nack(false, false)
+				_ = msg.Nack(false, false)
 				continue
 			}
+			fmt.Printf("DEBUG[response]: unmarshalled job=%s error=%v\n", rabbitResponse.CorrelationID, rabbitResponse.Error)
 			w.handleSingleMLResponse(&rabbitResponse)
+			fmt.Printf("DEBUG[response]: acking job=%s\n", rabbitResponse.CorrelationID)
 			_ = msg.Ack(false)
 		}
 	}
@@ -378,19 +381,23 @@ func (w *predictionJobWorker) handleMLResponses(msgs <-chan amqp.Delivery) {
 
 func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPredictionResponse) {
 	jobID := rabbitResponse.CorrelationID
+	fmt.Printf("DEBUG[handle]: start job=%s\n", jobID)
 
 	job, err := w.jobRepo.GetJobByID(jobID)
 	if err != nil {
-		fmt.Printf("Warning: job %s not found in DB: %v\n", jobID, err)
+		fmt.Printf("ERROR[handle]: GetJobByID failed job=%s err=%v\n", jobID, err)
 		return
 	}
+	fmt.Printf("DEBUG[handle]: job found job=%s status=%s\n", jobID, job.Status)
 
 	if job.Status != "submitted" {
+		fmt.Printf("DEBUG[handle]: skipping job=%s status=%s (not submitted)\n", jobID, job.Status)
 		return
 	}
 
 	if rabbitResponse.Error != nil {
 		errMsg := *rabbitResponse.Error
+		fmt.Printf("DEBUG[handle]: ML returned error job=%s err=%s\n", jobID, errMsg)
 		_ = w.jobRepo.UpdateJobStatus(jobID, "failed", &errMsg)
 		return
 	}
@@ -412,14 +419,20 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	if err := w.predRepo.SavePrediction(prediction); err != nil {
 		errMsg := fmt.Sprintf("Failed to save prediction: %v", err)
+		fmt.Printf("ERROR[handle]: SavePrediction failed job=%s err=%v\n", jobID, err)
 		_ = w.jobRepo.UpdateJobStatus(jobID, "failed", &errMsg)
 		return
 	}
+	fmt.Printf("DEBUG[handle]: prediction saved job=%s predictionID=%d\n", jobID, prediction.ID)
 
 	now := time.Now()
 	_ = w.userRepo.UpdateLastPredictionTime(job.UserID, &now)
 
-	_ = w.jobRepo.UpdateJobStatusWithResult(jobID, "completed", prediction.ID)
+	if err := w.jobRepo.UpdateJobStatusWithResult(jobID, "completed", prediction.ID); err != nil {
+		fmt.Printf("ERROR[handle]: UpdateJobStatusWithResult failed job=%s err=%v\n", jobID, err)
+	} else {
+		fmt.Printf("DEBUG[handle]: completed job=%s predictionID=%d\n", jobID, prediction.ID)
+	}
 
 	go syncXaiToChatbot(job.UserID, rabbitResponse)
 
@@ -472,14 +485,16 @@ func (w *predictionJobWorker) processJobFireAndForget(jobRequest models.Predicti
 		return
 	}
 
+	if err := w.jobRepo.UpdateJobStatus(jobID, models.JobStatusSubmitted, nil); err != nil {
+		return
+	}
+
 	correlationID := jobID
 	if err := w.mlClient.PredictAsync(ctx, correlationID, features); err != nil {
 		errMsg := fmt.Sprintf("Failed to submit to ML service: %v", err)
 		_ = w.jobRepo.UpdateJobStatus(jobID, models.JobStatusFailed, &errMsg)
 		return
 	}
-
-	_ = w.jobRepo.UpdateJobStatus(jobID, models.JobStatusSubmitted, nil)
 
 	go w.sendShadowPrediction(jobID, features)
 }
@@ -697,7 +712,6 @@ func convertToModelsResponse(rabbitResponse *RabbitMQPredictionResponse) *models
 		Timestamp:   parseTimestamp(rabbitResponse.Timestamp),
 	}
 }
-
 
 func (w *predictionJobWorker) extractFeatureInfoFromMLResponse(response *RabbitMQPredictionResponse, avgSmokeCount int) map[string]interface{} {
 	featureInfo := make(map[string]interface{})

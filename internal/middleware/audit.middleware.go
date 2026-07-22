@@ -16,7 +16,6 @@ import (
 var pathAction = map[string]map[string]string{
 	"POST": {
 		"/data/datasets":                         "UPLOAD_DATASET",
-		"/data/datasets/:id/preprocess":          "PREPROCESS_DATASET",
 		"/data/training/trigger":                 "TRIGGER_TRAINING",
 		"/data/shadow/activate":                  "ACTIVATE_SHADOW",
 		"/data/shadow/deactivate/:deployment_id": "DEACTIVATE_SHADOW",
@@ -86,12 +85,6 @@ func actionDetails(c *gin.Context, action string, body []byte) string {
 		if fn := str("filename"); fn != "" {
 			return fmt.Sprintf("%s (%s)", fn, str("version"))
 		}
-
-	case "PREPROCESS_DATASET":
-		if fn := str("filename"); fn != "" {
-			return fmt.Sprintf("%s (%s)", fn, str("version"))
-		}
-		return "dataset #" + c.Param("id")
 
 	case "TRIGGER_TRAINING":
 		if v := str("version"); v != "" {
