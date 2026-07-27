@@ -41,7 +41,7 @@ func TestListAuditLogs(t *testing.T) {
 					{ID: 1, UserID: 10, Action: "UPLOAD_DATASET", Details: "", Status: "success", CreatedAt: now},
 					{ID: 2, UserID: 10, Action: "TRIGGER_TRAINING", Details: "", Status: "failed", CreatedAt: now},
 				}
-				ar.On("List", 0, 2).Return(logs, int64(2), nil)
+				ar.On("List", 0, 2, "").Return(logs, int64(2), nil)
 				ur.On("GetUserByID", uint(10)).Return(&models.User{Name: "Alice", Role: "DATA_SCIENTIST"}, nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -60,7 +60,7 @@ func TestListAuditLogs(t *testing.T) {
 			name:  "uses default page and page_size when invalid",
 			query: "?page=0&page_size=0",
 			setupMock: func(ar *mocks.MockAuditLogRepository, ur *mocks.MockUserRepository) {
-				ar.On("List", 0, 20).Return([]*models.AuditLog{}, int64(0), nil)
+				ar.On("List", 0, 20, "").Return([]*models.AuditLog{}, int64(0), nil)
 			},
 			expectedStatus: http.StatusOK,
 			checkBody: func(t *testing.T, body map[string]interface{}) {
@@ -71,7 +71,7 @@ func TestListAuditLogs(t *testing.T) {
 			name:  "returns 500 when repo fails",
 			query: "",
 			setupMock: func(ar *mocks.MockAuditLogRepository, ur *mocks.MockUserRepository) {
-				ar.On("List", 0, 20).Return(nil, int64(0), errors.New("db error"))
+				ar.On("List", 0, 20, "").Return(nil, int64(0), errors.New("db error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			checkBody:      nil,
@@ -83,7 +83,7 @@ func TestListAuditLogs(t *testing.T) {
 				logs := []*models.AuditLog{
 					{ID: 1, UserID: 99, Action: "DELETE_USER", Status: "success", CreatedAt: now},
 				}
-				ar.On("List", 0, 20).Return(logs, int64(1), nil)
+				ar.On("List", 0, 20, "").Return(logs, int64(1), nil)
 				ur.On("GetUserByID", uint(99)).Return(nil, errors.New("not found"))
 			},
 			expectedStatus: http.StatusOK,

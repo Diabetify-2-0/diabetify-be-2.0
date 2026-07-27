@@ -377,8 +377,8 @@ func (m *MockAuditLogRepository) Create(log *models.AuditLog) error {
 	return args.Error(0)
 }
 
-func (m *MockAuditLogRepository) List(offset, limit int) ([]*models.AuditLog, int64, error) {
-	args := m.Called(offset, limit)
+func (m *MockAuditLogRepository) List(offset, limit int, search string) ([]*models.AuditLog, int64, error) {
+	args := m.Called(offset, limit, search)
 	if args.Get(0) == nil {
 		return nil, args.Get(1).(int64), args.Error(2)
 	}
