@@ -26,6 +26,7 @@ type Prediction struct {
 	BMIExplanation                        string         `gorm:"type:text" json:"bmi_explanation"`
 	AvgSmokeCount                         int            `json:"avg_smoke_count" example:"14"`
 	BrinkmanScore                         int            `gorm:"column:brinkman_score;check:brinkman_score IN (0,1,2,3)" json:"brinkman_score" example:"0" validate:"min=0,max=3"`
+	BrinkmanRawScore                      int            `gorm:"column:brinkman_raw_score" json:"brinkman_raw_score" example:"180"`
 	BrinkmanScoreShap                     float64        `json:"brinkman_score_shap" example:"0.05"`
 	BrinkmanScoreContribution             float64        `json:"brinkman_score_contribution" example:"0.2"`
 	BrinkmanScoreImpact                   float64        `json:"brinkman_score_impact" example:"0.3"`

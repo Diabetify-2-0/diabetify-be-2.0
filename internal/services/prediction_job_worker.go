@@ -415,6 +415,16 @@ func (w *predictionJobWorker) handleSingleMLResponse(rabbitResponse *RabbitMQPre
 
 	featureInfo := w.extractFeatureInfoFromMLResponse(rabbitResponse, avgSmokeCount)
 
+	var rawBrinkmanScore int
+	if user, userErr := w.userRepo.GetUserByID(job.UserID); userErr == nil {
+		if profile, profileErr := w.profileRepo.FindByUserID(job.UserID); profileErr == nil && profile != nil {
+			if raw, _, err := w.calculateBrinkmanIndex(user, profile, avgSmokeCount); err == nil {
+				rawBrinkmanScore = raw
+			}
+		}
+	}
+	featureInfo["brinkman_raw_score"] = rawBrinkmanScore
+
 	prediction := w.createPredictionRecord(job.UserID, modelResponse, featureInfo)
 
 	if err := w.predRepo.SavePrediction(prediction); err != nil {
@@ -642,7 +652,7 @@ func (w *predictionJobWorker) sendDriftLog(jobID string, pred *models.Prediction
 		"is_macrosomic_baby":          float64(pred.IsMacrosomicBaby),
 		"physical_activity_frequency": float64(pred.PhysicalActivityFrequency),
 		"is_bloodline":                w.boolToFloat(pred.IsBloodline),
-		"brinkman_index":              float64(pred.BrinkmanScore),
+		"brinkman_index":              float64(pred.BrinkmanRawScore),
 		"bmi":                         pred.BMI,
 		"is_hypertension":             w.boolToFloat(pred.IsHypertension),
 	}
@@ -826,6 +836,7 @@ func (w *predictionJobWorker) createPredictionRecord(userID uint, response *mode
 		BMIImpact:       bmiImpact,
 
 		BrinkmanScore:             getInt("brinkman_score"),
+		BrinkmanRawScore:          getInt("brinkman_raw_score"),
 		BrinkmanScoreShap:         brinkmanShap,
 		BrinkmanScoreContribution: brinkmanContribution,
 		BrinkmanScoreImpact:       brinkmanImpact,
@@ -918,6 +929,7 @@ func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, pr
 		physicalActivityFrequency int
 		isCholesterol             bool
 		brinkmanIndex             int
+		rawBrinkmanIndex          int
 		finalAvgSmokeCount        int
 	)
 
@@ -951,7 +963,7 @@ func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, pr
 		return nil, nil, fmt.Errorf("failed to calculate average smoke count: %v", err)
 	}
 
-	brinkmanIndex, err = w.calculateBrinkmanIndex(user, profile, finalAvgSmokeCount)
+	rawBrinkmanIndex, brinkmanIndex, err = w.calculateBrinkmanIndex(user, profile, finalAvgSmokeCount)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to calculate Brinkman index: %v", err)
 	}
@@ -973,6 +985,7 @@ func (w *predictionJobWorker) calculateFeaturesFromProfile(user *models.User, pr
 		"smoking_status":              smokingStatus,
 		"is_macrosomic_baby":          isMacrosomicBaby,
 		"brinkman_score":              brinkmanIndex,
+		"brinkman_raw_score":          rawBrinkmanIndex,
 		"bmi":                         bmi,
 		"is_hypertension":             isHypertension,
 		"is_cholesterol":              isCholesterol,
@@ -1030,7 +1043,7 @@ func (w *predictionJobWorker) calculateSmokingStatus(userID uint) (int, error) {
 	return 0, nil
 }
 
-func (w *predictionJobWorker) calculateBrinkmanIndex(user *models.User, profile *models.UserProfile, avgSmokeCount int) (int, error) {
+func (w *predictionJobWorker) calculateBrinkmanIndex(user *models.User, profile *models.UserProfile, avgSmokeCount int) (int, int, error) {
 	now := time.Now()
 	ageOfSmoking := 0
 	if profile.AgeOfSmoking != nil {
@@ -1041,13 +1054,13 @@ func (w *predictionJobWorker) calculateBrinkmanIndex(user *models.User, profile 
 		yearsOfSmoking = *profile.AgeOfStopSmoking - ageOfSmoking
 	} else {
 		if user.DOB == nil {
-			return 0, fmt.Errorf("date of birth is required")
+			return 0, 0, fmt.Errorf("date of birth is required")
 		}
 		dob, err := time.Parse(time.RFC3339, *user.DOB)
 		if err != nil {
 			dob, err = time.Parse("2006-01-02", *user.DOB)
 			if err != nil {
-				return 0, fmt.Errorf("invalid date of birth format: %v", err)
+				return 0, 0, fmt.Errorf("invalid date of birth format: %v", err)
 			}
 		}
 		age := now.Year() - dob.Year()
@@ -1072,7 +1085,7 @@ func (w *predictionJobWorker) calculateBrinkmanIndex(user *models.User, profile 
 	default:
 		categorizedIndex = 3
 	}
-	return categorizedIndex, nil
+	return rawBrinkmanIndex, categorizedIndex, nil
 }
 
 func (w *predictionJobWorker) calculatePhysicalActivityFrequency(userID uint, profile *models.UserProfile) (int, error) {
